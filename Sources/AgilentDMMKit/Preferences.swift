@@ -42,6 +42,18 @@ struct Preferences: Codable, Equatable {
         var graph = Graph()
     }
 
+    /// Notification banners. Off until asked for: an application that demands
+    /// permission to interrupt you on first launch, before it has measured
+    /// anything, has not earned it.
+    struct Alerts: Codable, Equatable {
+        var isEnabled = false
+        var kinds: Set<MeterAlert.Kind> = [.limit, .connectionLost]
+        /// Only when the app is not the one you are looking at. A banner over
+        /// the window whose big green number already says the same thing is
+        /// noise, not news.
+        var onlyWhenInBackground = true
+    }
+
     struct Speech: Codable, Equatable {
         var isEnabled = false
         var speaksPeriodically = true
@@ -82,6 +94,9 @@ struct Preferences: Codable, Equatable {
     var logDirectoryPath: String?
 
     var speech = Speech()
+    var alerts = Alerts()
+    /// The reading in the menu bar, for glancing at from another application.
+    var showsMenuBarReading = true
     /// The port that worked last time, so reconnecting is one click.
     var lastConnection: SerialConfig?
 
@@ -131,6 +146,8 @@ struct Preferences: Codable, Equatable {
         logDirectoryPath = optional(.logDirectoryPath, String.self)
 
         speech = value(.speech, defaults.speech)
+        alerts = value(.alerts, defaults.alerts)
+        showsMenuBarReading = value(.showsMenuBarReading, defaults.showsMenuBarReading)
         lastConnection = optional(.lastConnection, SerialConfig.self)
     }
 }

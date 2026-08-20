@@ -171,7 +171,23 @@ final class HistogramSettings {
 @MainActor
 @Observable
 final class AppModel {
+    /// The model the running application is using.
+    ///
+    /// App Intents arrive from outside the view hierarchy — there is no
+    /// environment to read them out of — and the serial port is open in this one
+    /// process, so there is exactly one model they could mean. Set by the app at
+    /// launch and by nothing else: a test making its own model must not become
+    /// the one Shortcuts talks to.
+    static var current: AppModel?
+
     var controller = DMMController()
+
+    /// Notification banners for the handful of events worth interrupting for.
+    let alerts = AlertCentre()
+
+    /// The live reading in the menu bar. Off costs nothing; on, it is the only
+    /// way to watch a capture without giving it a window.
+    var showsMenuBarReading = true
 
     private let store: PreferenceStore
     private var saveTask: Task<Void, Never>?
@@ -209,6 +225,7 @@ final class AppModel {
         if let saved = self.store.load() {
             apply(saved)
         }
+        controller.alerts = alerts
         observeForSaving()
     }
 
@@ -263,6 +280,11 @@ final class AppModel {
         preferences.logStatusText = controller.logStatusText
         preferences.logDirectoryPath = controller.logDirectory.path
 
+        preferences.alerts = Preferences.Alerts(isEnabled: alerts.isEnabled,
+                                                kinds: alerts.kinds,
+                                                onlyWhenInBackground: alerts.onlyWhenInBackground)
+        preferences.showsMenuBarReading = showsMenuBarReading
+
         preferences.speech = Preferences.Speech(
             isEnabled: controller.speech.isEnabled,
             speaksPeriodically: controller.speech.speaksPeriodically,
@@ -314,6 +336,16 @@ final class AppModel {
         if let path = preferences.logDirectoryPath {
             controller.setLogDirectory(URL(fileURLWithPath: path, isDirectory: true))
         }
+
+        alerts.kinds = preferences.alerts.kinds
+        alerts.onlyWhenInBackground = preferences.alerts.onlyWhenInBackground
+        // Last, and only if it was on: assigning `isEnabled` re-asks the system,
+        // which is silent once an answer exists — anybody with this saved has
+        // been asked already — and refreshes what Settings reports, so a
+        // permission revoked in System Settings shows up here rather than in a
+        // banner that never arrives.
+        if preferences.alerts.isEnabled { alerts.isEnabled = true }
+        showsMenuBarReading = preferences.showsMenuBarReading
 
         controller.speech.isEnabled = preferences.speech.isEnabled
         controller.speech.speaksPeriodically = preferences.speech.speaksPeriodically

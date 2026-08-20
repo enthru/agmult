@@ -56,8 +56,78 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# App Intents metadata — what makes the intents in Intents.swift visible to
+# Shortcuts, Spotlight and Siri.
+#
+# Xcode generates this from a build phase that Swift Package Manager has no
+# equivalent of, so the two steps it does are done by hand here: the compiler
+# writes out the compile-time constants of every type conforming to an App
+# Intents protocol, and appintentsmetadataprocessor turns those into the
+# Metadata.appintents bundle the system reads. Both tools ship inside Xcode
+# rather than the command line tools, so a machine without it still gets a
+# working app — just one Shortcuts cannot see.
+TOOLCHAIN="$(xcode-select -p 2>/dev/null)/Toolchains/XcodeDefault.xctoolchain"
+PROTOCOLS_SOURCE="$TOOLCHAIN/usr/share/swift/SwiftConstantValues/AppIntents.json"
+PROCESSOR="$TOOLCHAIN/usr/bin/appintentsmetadataprocessor"
+
+if [[ -x "$PROCESSOR" && -f "$PROTOCOLS_SOURCE" ]]; then
+    echo "Extracting App Intents metadata…"
+    WORK="$(mktemp -d)"
+    trap 'rm -rf "$WORK"' EXIT
+
+    # The compiler wants a bare array of protocol names; the toolchain ships the
+    # same list wrapped in an object with a version alongside it.
+    /usr/bin/python3 -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["constValueProtocols"], open(sys.argv[2], "w"))' \
+        "$PROTOCOLS_SOURCE" "$WORK/protocols.json"
+
+    MODULE_SOURCES=("$ROOT"/Sources/AgilentDMMKit/*.swift)
+    OTHER_SOURCES=()
+    for source in "${MODULE_SOURCES[@]}"; do
+        [[ "$source" == *"/Intents.swift" ]] || OTHER_SOURCES+=("$source")
+    done
+
+    # One frontend job over the module with Intents.swift as the primary file.
+    # Constants are gathered per primary file, and that is the only file with
+    # anything to gather.
+    "$TOOLCHAIN/usr/bin/swiftc" -frontend -c \
+        -primary-file "$ROOT/Sources/AgilentDMMKit/Intents.swift" "${OTHER_SOURCES[@]}" \
+        -o "$WORK/Intents.o" \
+        -module-name AgilentDMMKit -swift-version 5 \
+        -sdk "$(xcrun --show-sdk-path)" \
+        -target "$(uname -m)-apple-macos14.0" \
+        -I "$(dirname "$BINARY")/Modules" \
+        -plugin-path "$TOOLCHAIN/usr/lib/swift/host/plugins" \
+        -const-gather-protocols-file "$WORK/protocols.json" \
+        -emit-const-values-path "$WORK/Intents.swiftconstvalues" \
+        >/dev/null 2>&1
+
+    if [[ -f "$WORK/Intents.swiftconstvalues" ]]; then
+        printf '%s\n' "${MODULE_SOURCES[@]}" > "$WORK/sources.txt"
+        echo "$WORK/Intents.swiftconstvalues" > "$WORK/constvals.txt"
+
+        "$PROCESSOR" \
+            --output "$APP/Contents/Resources" \
+            --toolchain-dir "$TOOLCHAIN" \
+            --module-name AgilentDMMKit \
+            --sdk-root "$(xcrun --show-sdk-path)" \
+            --xcode-version "$(xcodebuild -version | tail -1 | awk '{print $3}')" \
+            --platform-family macOS \
+            --deployment-target 14.0 \
+            --target-triple "$(uname -m)-apple-macos14.0" \
+            --source-file-list "$WORK/sources.txt" \
+            --swift-const-vals-list "$WORK/constvals.txt" \
+            --force
+    else
+        echo "  skipped: the compiler produced no constant values"
+    fi
+else
+    echo "App Intents metadata skipped — needs a full Xcode, not just the command line tools."
+    echo "  The app works; Shortcuts will not list its actions."
+fi
+
 # An ad-hoc signature is enough to run locally and keeps macOS from complaining
-# about a broken bundle after the binaries were copied in.
+# about a broken bundle after the binaries were copied in. It goes last: the
+# metadata bundle above is part of what gets signed.
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "Built $APP"

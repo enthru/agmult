@@ -143,6 +143,24 @@ final class InterfaceRenderTests: XCTestCase {
                        "the row is being clamped to \(withFloor - withoutFloor) points less than it needs")
     }
 
+    /// The menu bar item, drawn against a live meter. Its label is what the
+    /// system puts in the bar and its content is a menu, which `ImageRenderer`
+    /// will not draw — but evaluating the body is what catches a binding that
+    /// went stale, and the label is real drawing.
+    func testTheMenuBarItemRendersWhatItWillShow() throws {
+        let readout = MenuBarReadout(controller: model.controller)
+        readout.sample()
+        XCTAssertTrue(readout.isConnected)
+        XCTAssertTrue(readout.title.contains("V"), "expected a voltage, got \(readout.title)")
+        XCTAssertLessThanOrEqual(readout.title.count, 12, "the menu bar is not a place for a long number")
+
+        try write(try render(MenuBarLabel(readout: readout), size: CGSize(width: 140, height: 24)),
+                  named: "menu-bar-label.png")
+        let menu = try render(MenuBarReadoutContent().environment(model),
+                              size: CGSize(width: 260, height: 320))
+        XCTAssertGreaterThan(menu.size.width, 0)
+    }
+
     func testControlPanelsRender() throws {
         try write(try render(FunctionBar().environment(model), size: CGSize(width: 700, height: 90)),
                   named: "panel-function.png")

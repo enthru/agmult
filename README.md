@@ -20,7 +20,8 @@ system DC power supplies.
 ## Requirements
 
 - macOS 14 or later
-- Xcode command line tools (Swift 6)
+- Xcode command line tools (Swift 6). A full Xcode is needed only for the
+  Shortcuts actions — see [Automation](#automation).
 - A USB-to-RS-232 adapter **and a null-modem adapter or cable** — or nothing at
   all, if you use the built-in simulator
 
@@ -28,7 +29,7 @@ system DC power supplies.
 
 ```sh
 swift build                  # build everything
-swift test                   # 192 tests, including a full loop against the simulator
+swift test                   # 208 tests, including a full loop against the simulator
 ./Scripts/make-app.sh        # assemble build/AgilentDMM.app
 open build/AgilentDMM.app
 ```
@@ -131,6 +132,13 @@ when you want the trace on its own screen.
 - **Speech** — spoken readings on a timer or when a threshold is crossed. More
   useful than it sounds: when both hands are holding probes onto a board,
   hearing the reading is the only way to take it.
+- **Menu bar** — the reading in the menu bar, with the statistics behind it, for
+  watching a capture from inside whatever you are actually working in.
+- **Notifications** — a banner when a limit trips, when the input overloads or
+  when the meter stops answering. Each kind separately, and by default only
+  while another application is in front.
+- **Shortcuts** — take a reading, read a statistic, choose a function or reset
+  the history, as actions any automation can call. See below.
 - **Settings are remembered** — panel colours, graph and histogram appearance,
   math waveform definitions and their chains, the polling plan, the meter and
   math configuration, history size, logging, speech, and the port that worked
@@ -163,6 +171,37 @@ The readings in a burst are stamped evenly across the time the burst took. The
 meter does not stamp them itself, so this is an estimate: a good one at a steady
 rate, and the only honest option. It is also why stability work wants readings
 per burst set to 1 — the Stability window says so when the spacing is ragged.
+
+## Automation
+
+The app publishes four App Intents, so a bench instrument becomes something a
+script can ask a question of:
+
+| Action | What it gives back |
+| --- | --- |
+| Take a Reading | The latest reading, as a number |
+| Read Statistics | Mean, minimum, maximum, σ, peak-to-peak or count |
+| Set Measurement Function | Switches the meter, any of the eleven functions |
+| Reset History and Statistics | Starts a run over |
+
+They appear in Shortcuts, Spotlight and Siri once the app has been launched
+once. All four work on the running application — the serial port is open in that
+one process and cannot be shared — so an intent that arrives while the app is
+closed will launch it, and one that arrives with no meter connected says so
+rather than inventing a number.
+
+Read a voltage after each step of a soak test and write it into a spreadsheet;
+watch a reference warm up and stop when it settles; take a reading every time a
+build finishes. None of that is in the original, and the meter itself offers
+nothing but this serial line.
+
+**Building this part needs a full Xcode**, not just the command line tools.
+Shortcuts finds actions through a `Metadata.appintents` bundle that Xcode
+generates from a build phase Swift Package Manager has no equivalent of;
+`Scripts/make-app.sh` does the same two steps by hand — the compiler writes out
+the compile-time constants of everything conforming to an App Intents protocol,
+and `appintentsmetadataprocessor` turns those into the bundle. Without Xcode the
+script says so and carries on: the app works, Shortcuts just cannot see it.
 
 ## Keyboard shortcuts
 
@@ -274,6 +313,8 @@ thing that turns into a hung application:
 - Log files default to `~/Documents/AgilentDMM` rather than the working
   directory.
 - Speech uses AVFoundation, so it speaks in whichever system voice is selected.
+- A menu bar item, notification banners and Shortcuts actions have no equivalent
+  in the original, which predates all three.
 
 ## Tests
 
@@ -303,6 +344,14 @@ on the main actor, including a front-panel change being adopted, a limit trip
 being logged once rather than every pass, the data logger writing to disk, a
 meter that stops answering ending the session, and a direct count of the round
 trips saved by combining queries.
+
+The automation surface is covered without any of it touching the system: the
+alert centre is built with its delivery, its permission request and its "is the
+app in front" test injected, so a test asserts on what would have been posted
+rather than posting it. The menu bar readout is checked for saying nothing
+rather than zero when there is no meter. The Shortcuts vocabulary has to spell
+the eleven functions out a second time — App Intents will not take an enum from
+another module — and a test walks both lists to keep them from drifting apart.
 
 Interface tests render the views off-screen against live simulator data; set
 `AGMULT_RENDER_DIR` to write the images out:

@@ -5,9 +5,15 @@ import DMMCore
 import DMMSimulator
 
 struct AgilentDMMApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+    @State private var menuBar: MenuBarReadout
 
     init() {
+        let model = AppModel()
+        _model = State(initialValue: model)
+        _menuBar = State(initialValue: MenuBarReadout(controller: model.controller))
+        AppModel.current = model
+
         // Lets the app behave like a normal windowed application even when the
         // binary is run straight out of .build rather than from a bundle.
         NSApplication.shared.setActivationPolicy(.regular)
@@ -53,6 +59,15 @@ struct AgilentDMMApp: App {
             MathWaveformWindow(waveformID: identifier).environment(model)
         }
         .defaultSize(width: 940, height: 620)
+
+        // The reading in the menu bar, for watching a capture from inside
+        // another application. `isInserted` is the whole of the on/off switch:
+        // SwiftUI adds and removes the item as the binding changes.
+        MenuBarExtra(isInserted: $model.showsMenuBarReading) {
+            MenuBarReadoutContent().environment(model)
+        } label: {
+            MenuBarLabel(readout: menuBar)
+        }
 
         Window("Serial Connection Help", id: "help-serial") { SerialHelpView() }
         Window("General Help", id: "help-general") { GeneralHelpView() }
@@ -289,10 +304,7 @@ struct AppCommands: Commands {
                     get: { controller.speech.isEnabled },
                     set: { controller.speech.isEnabled = $0 }
                 ))
-                Button("Speak Now") {
-                    guard let value = controller.latestReading else { return }
-                    controller.speech.speak(controller.speech.spoken(value: value, unit: controller.displayUnit))
-                }
+                Button("Speak Now") { controller.speakNow() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(controller.latestReading == nil)
                 Button("Stop Speaking") { controller.speech.stop() }

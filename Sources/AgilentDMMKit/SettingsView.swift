@@ -57,11 +57,56 @@ struct GeneralSettings: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Menu Bar") {
+                Toggle("Show the reading in the menu bar", isOn: $model.showsMenuBarReading)
+                Text("Updated twice a second, which is as fast as a number in a menu bar can be read. The menu behind it carries the statistics and the way back to the window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Alerts") {
                 Toggle("Beep when a limit test fails", isOn: $controller.beeperEnabled)
+                alertSettings
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Notification banners. The kinds are listed rather than rolled into one
+    /// switch because they are not the same kind of event: a limit trip is the
+    /// thing you set up and walked away from, an overload is usually you holding
+    /// a probe somewhere, and a lost connection ends the session.
+    @ViewBuilder
+    private var alertSettings: some View {
+        @Bindable var alerts = model.alerts
+
+        Toggle("Notify with a banner", isOn: $alerts.isEnabled)
+
+        if alerts.isEnabled {
+            ForEach(MeterAlert.Kind.allCases, id: \.self) { kind in
+                Toggle(isOn: Binding(get: { alerts.kinds.contains(kind) },
+                                     set: { wanted in
+                                         if wanted { alerts.kinds.insert(kind) } else { alerts.kinds.remove(kind) }
+                                     })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(kind.title)
+                        Text(kind.explanation)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 18)
+            }
+
+            Toggle("Only while another app is in front", isOn: $alerts.onlyWhenInBackground)
+                .padding(.leading, 18)
+
+            if let explanation = alerts.authorization.explanation {
+                Text(explanation)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
     }
 }
 

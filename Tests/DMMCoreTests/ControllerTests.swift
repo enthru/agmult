@@ -45,6 +45,24 @@ final class ControllerTests: XCTestCase {
         logDirectory = nil
     }
 
+    /// Records what it was handed. The real one puts a banner on the screen,
+    /// which is not a thing a test should be able to do.
+    @MainActor
+    private final class RecordingAlerts: AlertPresenter {
+        var wanted: Set<MeterAlert.Kind> = Set(MeterAlert.Kind.allCases)
+        private(set) var alerts: [MeterAlert] = []
+        private(set) var asked: [MeterAlert.Kind] = []
+
+        func wantsAlert(of kind: MeterAlert.Kind) -> Bool {
+            asked.append(kind)
+            return wanted.contains(kind)
+        }
+
+        func present(_ alert: MeterAlert) { alerts.append(alert) }
+
+        func alerts(of kind: MeterAlert.Kind) -> [MeterAlert] { alerts.filter { $0.kind == kind } }
+    }
+
     private func connect() throws {
         // A short deadline keeps the "meter went away" test from spending
         // half a minute waiting for reads that will never be answered.
@@ -287,6 +305,60 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(failures.count, 1, "a trip is logged once, not on every pass")
     }
 
+    func testATripRaisesOneAlertCarryingBothNumbers() async throws {
+        let alerts = RecordingAlerts()
+        controller.alerts = alerts
+
+        try connect()
+        try await waitUntil("readings") { self.controller.readingCount > 0 }
+
+        controller.setLimits(lower: 0, upper: 1)
+        controller.setMathFunction(.limit)
+        try await waitUntil("the limit alert") { !alerts.alerts(of: .limit).isEmpty }
+        try await settle()
+
+        XCTAssertEqual(alerts.alerts(of: .limit).count, 1, "one banner per trip, not one per polling pass")
+        let alert = try XCTUnwrap(alerts.alerts(of: .limit).first)
+        XCTAssertTrue(alert.body.contains("above"), "which way it went: \(alert.body)")
+        XCTAssertTrue(alert.body.contains("1.00000 V"), "and past what: \(alert.body)")
+    }
+
+    func testAnAlertNobodyAskedForIsNeverBuilt() async throws {
+        let alerts = RecordingAlerts()
+        alerts.wanted = []
+        controller.alerts = alerts
+
+        try connect()
+        try await waitUntil("readings") { self.controller.readingCount > 0 }
+        controller.setRange(1)
+        try await waitUntil("an overload") { self.controller.isOverloaded }
+        try await settle()
+
+        XCTAssertTrue(alerts.asked.contains(.overload), "the presenter is still asked")
+        XCTAssertTrue(alerts.alerts.isEmpty, "and says no, so nothing is built or delivered")
+    }
+
+    func testAnOverloadAlertsOnTheEdgeRatherThanEverySecondItLasts() async throws {
+        let alerts = RecordingAlerts()
+        controller.alerts = alerts
+
+        try connect()
+        try await waitUntil("readings") { self.controller.readingCount > 0 }
+
+        controller.setRange(1)
+        try await waitUntil("an overload") { self.controller.isOverloaded }
+        // Long enough for many more polling passes, all of them overloaded.
+        try await settle(1.0)
+        XCTAssertEqual(alerts.alerts(of: .overload).count, 1,
+                       "probing a live board sits in overload for minutes")
+
+        // Coming back into range and going out again is a second event.
+        controller.setAutoRange(true)
+        try await waitUntil("a valid reading") { self.controller.readingIsValid }
+        controller.setRange(1)
+        try await waitUntil("a second overload alert") { alerts.alerts(of: .overload).count == 2 }
+    }
+
     // MARK: - Maths
 
     func testCaptureNullTakesAReadingAndUsesItAsTheOffset() async throws {
@@ -429,5 +501,20 @@ final class ControllerTests: XCTestCase {
 
         XCTAssertNotNil(controller.connectionError)
         XCTAssertTrue(controller.entries.contains { $0.text.contains("Connection lost") })
+    }
+
+    func testAMeterThatGoesAwayRaisesAnAlertBeforeTheSessionEnds() async throws {
+        let alerts = RecordingAlerts()
+        controller.alerts = alerts
+
+        try connect()
+        try await waitUntil("readings") { self.controller.readingCount > 0 }
+
+        server.isMute = true
+        try await waitUntil("the loop to give up", timeout: 45) { !self.controller.isConnected }
+
+        let alert = try XCTUnwrap(alerts.alerts(of: .connectionLost).first,
+                                  "the one event most likely to happen while nobody is watching")
+        XCTAssertTrue(alert.title.contains("HP34401A"), alert.title)
     }
 }

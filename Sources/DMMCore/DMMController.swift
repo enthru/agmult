@@ -91,6 +91,10 @@ public final class DMMController {
     public private(set) var errorText = "—"
     /// What the meter says about its own calibration, once it has been asked.
     public private(set) var calibration: CalibrationInfo?
+
+    /// Where alerts go — a notification banner in the application, nothing at
+    /// all in a test. Weak: the presenter belongs to whoever made it.
+    public weak var alerts: AlertPresenter?
     public var message = ""
 
     public var readingIsValid: Bool { latestReading != nil && !isOverloaded }
@@ -263,6 +267,9 @@ public final class DMMController {
         if let failure = snapshot.failure {
             connectionError = failure
             append("Connection lost: \(failure)")
+            raise(.connectionLost,
+                  title: "\(identity?.model ?? "The meter") stopped answering",
+                  body: failure)
             disconnect()
             return
         }
@@ -302,6 +309,14 @@ public final class DMMController {
         guard !snapshot.readings.isEmpty else {
             // Nothing but overloads this pass still tells the panel something.
             if snapshot.overloadCount > 0 {
+                // The edge, not the state: probing a live board can sit in
+                // overload for minutes, and one banner a second is not an alert,
+                // it is a fault of its own.
+                if !isOverloaded {
+                    raise(.overload,
+                          title: "Overload",
+                          body: "The input is past full scale on the \(Format.range(configuration.range, unit: configuration.function.rangeUnit)) range.")
+                }
                 isOverloaded = true
                 history.recordOverload()
                 appendReadingLine(nil, at: snapshot.timestamp)
@@ -350,7 +365,10 @@ public final class DMMController {
             for label in status.labels {
                 append(label)
             }
-            if status.limitFailed { beep() }
+            if status.limitFailed {
+                beep()
+                raise(.limit, title: "Limit tripped", body: limitAlertBody(status))
+            }
         }
     }
 
@@ -601,6 +619,13 @@ public final class DMMController {
         requireConnection()?.enqueue(.clearInterface)
     }
 
+    /// Says the current reading aloud — ⇧⌘T, the Speech menu and the menu bar
+    /// item all want the same sentence.
+    public func speakNow() {
+        guard let value = latestReading else { return }
+        speech.speak(speech.spoken(value: value, unit: displayUnit))
+    }
+
     public func beepOnce() {
         guard requireConnection() != nil else { return }
         enqueue(SCPI.beep.asCommands, log: "Beep")
@@ -649,6 +674,27 @@ public final class DMMController {
     public func returnToLocal() {
         frontPanelIsLocked = false
         enqueue(SCPI.local.asCommands, log: "Front panel unlocked")
+    }
+
+    /// Hands an alert to the presenter, if there is one and it wants this kind.
+    /// Building the message is not free — it formats a reading — so the question
+    /// is asked first.
+    private func raise(_ kind: MeterAlert.Kind, title: String, body: @autoclosure () -> String) {
+        guard let alerts, alerts.wantsAlert(of: kind) else { return }
+        alerts.present(MeterAlert(kind: kind, title: title, body: body()))
+    }
+
+    /// Which way the reading went, and past what. The status register says only
+    /// that a limit failed; the numbers come from what was asked for.
+    private func limitAlertBody(_ status: QuestionableStatus) -> String {
+        let reading = latestReading.map { formatted($0) } ?? "The reading"
+        if status.limitFailedHigh {
+            return "\(reading) is above the \(formatted(math.upperLimit)) upper limit."
+        }
+        if status.limitFailedLow {
+            return "\(reading) is below the \(formatted(math.lowerLimit)) lower limit."
+        }
+        return "\(reading) left the limits."
     }
 
     private func beep() {
