@@ -38,6 +38,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>AgilentDMM</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.agmult.AgilentDMM</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -62,14 +64,61 @@ PLIST
 #
 # The artwork is deliberately not in the repository: drop an icon.png in the
 # root and it is picked up, leave it out and the app gets the generic icon.
-# make-icon.swift does the work, because artwork never arrives in the shape an
-# icon wants — landscape, or adrift in transparency, or filling the canvas edge
-# to edge — and `sips -z` squashes the first and leaves the rest sitting at
-# different sizes in the Dock.
+#
+# Two formats, because macOS 26 changed what an app icon is. Before it, the
+# system drew the .icns as given. On 26 it draws its own rounded plate and sets
+# a plain .icns *inside* it — the app ends up as a small picture in a white box,
+# and no amount of adjusting the margins in the artwork changes it, because the
+# system re-fits whatever it is handed. The new format inverts that: the artwork
+# is the plate, and the system rounds and shades it. It is an Icon Composer
+# document, which is a directory holding one JSON file and the images, so it can
+# be written here rather than drawn in the app.
+#
+# actool emits both — Assets.car for 26 and an .icns for everything older — and
+# needs a full Xcode. Without one, make-icon.swift builds the .icns by itself and
+# the icon is the legacy one, which is what that machine would show anyway.
 ICON_SOURCE="$ROOT/icon.png"
 if [[ -f "$ICON_SOURCE" ]]; then
     echo "Building the icon…"
-    swift "$ROOT/Scripts/make-icon.swift" "$ICON_SOURCE" "$APP/Contents/Resources/AppIcon.icns"
+    ICON_WORK="$(mktemp -d)"
+    swift "$ROOT/Scripts/make-icon.swift" --square "$ICON_SOURCE" "$ICON_WORK/artwork.png"
+
+    if xcrun --find actool >/dev/null 2>&1; then
+        mkdir -p "$ICON_WORK/AppIcon.icon/Assets"
+        cp "$ICON_WORK/artwork.png" "$ICON_WORK/AppIcon.icon/Assets/artwork.png"
+        cat > "$ICON_WORK/AppIcon.icon/icon.json" <<'ICONJSON'
+{
+  "fill" : "automatic",
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "artwork.png",
+          "name" : "Artwork"
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [ "watchOS" ],
+    "squares" : [ "macOS", "iOS" ]
+  }
+}
+ICONJSON
+        # The deployment target here is the icon format's, not the app's: 26 is
+        # what makes actool emit the new icon at all, and it emits the .icns
+        # alongside for the systems this app still supports.
+        xcrun actool --output-format human-readable-text --notices --warnings \
+            --app-icon AppIcon \
+            --output-partial-info-plist "$ICON_WORK/icon.plist" \
+            --platform macosx --minimum-deployment-target 26.0 --target-device mac \
+            --compile "$APP/Contents/Resources" "$ICON_WORK/AppIcon.icon" >/dev/null
+    else
+        echo "  no Xcode: building the icon macOS used before 26"
+        swift "$ROOT/Scripts/make-icon.swift" --icns "$ICON_SOURCE" "$APP/Contents/Resources/AppIcon.icns"
+    fi
+
+    rm -rf "$ICON_WORK"
 else
     echo "No icon.png in the repository root — the app gets the generic icon."
 fi

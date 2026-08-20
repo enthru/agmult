@@ -32,12 +32,17 @@ let fill = 1.0
 /// itself short of the edges, which is the whole problem again.
 let visible = 0.5
 
-guard CommandLine.arguments.count == 3 else {
-    FileHandle.standardError.write(Data("usage: make-icon.swift <source.png> <output.icns>\n".utf8))
+// --icns writes the icon macOS has always taken. --square writes one full-bleed
+// PNG, which is what the icon format on macOS 26 wants: there the artwork *is*
+// the icon, and the system rounds and shades it.
+guard CommandLine.arguments.count == 4,
+      ["--icns", "--square"].contains(CommandLine.arguments[1]) else {
+    FileHandle.standardError.write(Data("usage: make-icon.swift --icns|--square <source.png> <output>\n".utf8))
     exit(2)
 }
-let source = CommandLine.arguments[1]
-let output = CommandLine.arguments[2]
+let mode = CommandLine.arguments[1]
+let source = CommandLine.arguments[2]
+let output = CommandLine.arguments[3]
 
 guard let data = try? Data(contentsOf: URL(fileURLWithPath: source)),
       let bitmap = NSBitmapImageRep(data: data) else {
@@ -67,12 +72,6 @@ let crop = NSRect(x: minX,
                   height: maxY - minY + 1)
 let longest = max(crop.width, crop.height)
 
-let sizes = [16, 32, 128, 256, 512]
-let iconset = URL(fileURLWithPath: NSTemporaryDirectory())
-    .appendingPathComponent("AppIcon-\(ProcessInfo.processInfo.processIdentifier).iconset")
-try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
-defer { try? FileManager.default.removeItem(at: iconset) }
-
 func render(side: Int, to url: URL) throws {
     guard let canvas = NSBitmapImageRep(bitmapDataPlanes: nil,
                                         pixelsWide: side, pixelsHigh: side,
@@ -101,6 +100,18 @@ func render(side: Int, to url: URL) throws {
     guard let png = canvas.representation(using: .png, properties: [:]) else { return }
     try png.write(to: url)
 }
+
+if mode == "--square" {
+    try render(side: 1024, to: URL(fileURLWithPath: output))
+    exit(0)
+}
+
+let sizes = [16, 32, 128, 256, 512]
+let iconset = URL(fileURLWithPath: NSTemporaryDirectory())
+    .appendingPathComponent("AppIcon-\(ProcessInfo.processInfo.processIdentifier).iconset")
+try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: iconset) }
+
 
 for size in sizes {
     try render(side: size, to: iconset.appendingPathComponent("icon_\(size)x\(size).png"))
