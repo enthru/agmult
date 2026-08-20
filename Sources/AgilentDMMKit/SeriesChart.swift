@@ -96,10 +96,24 @@ struct SeriesChart: View {
                 RuleMark(y: .value(marker.label, marker.value))
                     .foregroundStyle(marker.color)
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .annotation(position: .top, alignment: .leading) {
+                    // The label sits on the plot, so whatever the curve is
+                    // doing runs straight through it — and a dense capture is
+                    // doing something everywhere. It gets the plot's own
+                    // background behind it, and `fitToPlot` keeps the topmost
+                    // marker from being cut off against the top edge.
+                    .annotation(position: .top,
+                                alignment: .leading,
+                                spacing: 2,
+                                overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))) {
                         Text(marker.label)
                             .font(.caption2)
                             .foregroundStyle(marker.color)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(settings.plotBackground.color.opacity(0.85))
+                            )
                     }
             }
         }

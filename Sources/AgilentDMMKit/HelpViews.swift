@@ -113,6 +113,25 @@ struct GeneralHelpView: View {
             HelpSection("Speech") {
                 Text("Spoken readings, on a timer or when a threshold is crossed. More useful than it sounds: when both hands are holding probes onto a board, hearing the reading is the only way to take it.")
             }
+
+            HelpSection("Watching without the window") {
+                Text("The menu bar item shows the live reading next to a small waveform icon, at the right-hand end of the menu bar with the other status items — the clock, the battery, Wi-Fi. It updates twice a second, which is as fast as a number in a menu bar can be read, and shows a dash when no meter is connected. Click it for the statistics and the way back here. Settings ▸ General turns it off.")
+                Text("If you cannot find it: this application has a long menu bar of its own, and on a Mac with a notch macOS silently hides the status items that no longer fit. Switch to the Finder for a moment — its menus are short — and the item has room to appear.")
+                Text("Notification banners cover three events: a limit test tripping, the input going past full scale, and the meter ceasing to answer. Each can be switched on separately in Settings ▸ General, and they are off until asked for. By default they appear only while another application is in front, since a banner over the window that already says the same thing is noise.")
+            }
+
+            HelpSection("Shortcuts and automation") {
+                Text("Four actions are published to Shortcuts, Spotlight and Siri: Take a Reading, Read Statistics, Set Measurement Function and Reset History. A shortcut can read a voltage after each step of a soak test and write it into a spreadsheet, or watch a reference warm up and stop when it settles.")
+                Text("They work on the running application — the serial port is open in this one process and cannot be shared — so an action that arrives while the app is closed launches it, and one that arrives with no meter connected says so rather than inventing a number.")
+                Text("The actions appear only in a build made with a full Xcode installed. Shortcuts finds them through a metadata bundle that Scripts/make-app.sh generates; without Xcode the script says it skipped that step.")
+            }
+
+            HelpSection("The instrument itself") {
+                Text("DC Voltage Ratio is the eleventh function and the odd one out: it divides the signal on the Input terminals by a reference on Sense, so it reads as a bare number with no unit. It has no settings of its own — range, integration time and auto zero are the DC voltage ones, and the reference is always auto-ranged.")
+                Text("Lock Panel sends SYSTem:RWLock, which disables every front-panel key including LOCAL. Worth having for a meter in a rack that nobody should touch; it can only be undone from here, which is the point of it.")
+                Text("Get, beside the error text, empties the meter's error queue rather than taking one entry off it. The queue is a queue: asking once tells you about the first failure and leaves the rest to surface later attached to something innocent.")
+                Text("The calibration count and message are read once per session — hover the model name in the status strip. They say how many times the meter has been adjusted and what the last person to do it wrote down. Read-only: the commands that perform a calibration are deliberately not implemented.")
+            }
         }
     }
 }

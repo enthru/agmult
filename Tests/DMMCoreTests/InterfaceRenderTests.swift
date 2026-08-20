@@ -213,6 +213,29 @@ final class InterfaceRenderTests: XCTestCase {
                   named: "graph-time-black.png")
     }
 
+    /// The marker labels sit on the plot, and a fast capture puts the curve
+    /// through every part of it. They were drawn as bare text and became
+    /// unreadable the moment the signal filled the frame — which is exactly
+    /// when a graph is worth looking at.
+    func testMarkerLabelsSurviveACurveDrawnStraightThroughThem() async throws {
+        server.simulatedMeter.signal.modulationDepth = 0.5
+        server.simulatedMeter.signal.modulationPeriod = 0.4
+        model.controller.resetHistory()
+
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            if model.controller.history.samples.count > 400 { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let statistics = model.controller.statistics
+        XCTAssertGreaterThan(statistics.peakToPeak, 0.1, "the curve has to actually fill the frame")
+
+        model.graph.showMean = true
+        model.graph.showExtremes = true
+        try write(try render(GraphWindow().environment(model), size: CGSize(width: 940, height: 600)),
+                  named: "graph-markers-over-curve.png")
+    }
+
     func testStabilityWindowRenders() throws {
         XCTAssertNotNil(AllanDeviation.compute(readings: model.controller.history.samples),
                         "the window needs a curve to draw")
