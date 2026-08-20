@@ -14,12 +14,23 @@ import AppKit
 // back centred in a square at a fixed fraction of the width. Whatever the source
 // looks like, every icon built this way sits the same way in the Dock.
 
-/// How much of the square the artwork fills. The rest is the margin macOS
-/// expects around an app icon — and where the artwork's own shadow lands.
-let fill = 0.88
+/// How much of the square the artwork fills.
+///
+/// All of it, deliberately. macOS 26 draws its own light rounded plate behind
+/// every icon that is still a plain .icns, so any margin left here is not a
+/// margin — it is a window onto that plate, and the icon ends up as a small
+/// picture sitting inside a white box. Filling the square covers the plate.
+///
+/// This is what a legacy icon can do. The proper fix on 26 is to ship the new
+/// format, where the artwork *is* the plate, and that needs Icon Composer.
+let fill = 1.0
 
-/// Alpha below this is not artwork, it is the tail of a glow.
-let visible = 0.02
+/// What counts as artwork to crop to.
+///
+/// Half-opaque rather than barely-there: these icons carry a soft glow around
+/// the tile, and cropping to the last visible wisp of it would leave the tile
+/// itself short of the edges, which is the whole problem again.
+let visible = 0.5
 
 guard CommandLine.arguments.count == 3 else {
     FileHandle.standardError.write(Data("usage: make-icon.swift <source.png> <output.icns>\n".utf8))
