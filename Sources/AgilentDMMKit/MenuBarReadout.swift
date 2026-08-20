@@ -71,15 +71,19 @@ final class MenuBarReadout {
 ///
 /// A monospaced digit font, or the item resizes on every changing digit and
 /// drags every menu to its right along with it.
+///
+/// The text is always drawn, including the dash that stands for "no meter".
+/// It began as an icon on its own until there was a reading to show, which made
+/// the item impossible to find: a small anonymous glyph among a dozen other
+/// small anonymous glyphs, saying nothing about which app it belonged to. An
+/// item nobody can find is not a feature, however correctly it is installed.
 struct MenuBarLabel: View {
     let readout: MenuBarReadout
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: readout.isConnected ? "waveform.path.ecg" : "waveform.path.ecg.rectangle")
-            if readout.isConnected {
-                Text(readout.title).monospacedDigit()
-            }
+            Image(systemName: "waveform.path.ecg")
+            Text(readout.title).monospacedDigit()
         }
     }
 }

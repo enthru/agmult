@@ -90,6 +90,17 @@ final class AutomationTests: XCTestCase {
         XCTAssertEqual(MenuBarReadout.compactReading(of: controller), "—")
     }
 
+    func testTheMenuBarItemAlwaysHasSomethingToShow() {
+        // The item is drawn from `title` alone, so an empty one would leave a
+        // bare icon in the bar with nothing to say whose it is.
+        let controller = DMMController()
+        let readout = MenuBarReadout(controller: controller)
+        for _ in 0..<3 {
+            readout.sample()
+            XCTAssertFalse(readout.title.isEmpty)
+        }
+    }
+
     func testTheMenuBarUpdatesSlowlyEnoughToBeRead() {
         // Twenty readings a second is a number nobody can read and a menu bar
         // that redraws twenty times a second. Two a second is the compromise.

@@ -156,6 +156,13 @@ final class InterfaceRenderTests: XCTestCase {
 
         try write(try render(MenuBarLabel(readout: readout), size: CGSize(width: 140, height: 24)),
                   named: "menu-bar-label.png")
+
+        // And with no meter: still a legible item rather than a bare glyph.
+        model.controller.disconnect()
+        readout.sample()
+        XCTAssertFalse(readout.title.isEmpty)
+        try write(try render(MenuBarLabel(readout: readout), size: CGSize(width: 140, height: 24)),
+                  named: "menu-bar-label-idle.png")
         let menu = try render(MenuBarReadoutContent().environment(model),
                               size: CGSize(width: 260, height: 320))
         XCTAssertGreaterThan(menu.size.width, 0)
