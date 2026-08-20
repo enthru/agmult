@@ -14,12 +14,10 @@ annunciators across the top with the running statistics beside them, the functio
 keys and measurement panels on the left, and the live graph over the reading
 table on the right](screen.jpg)
 
-**Пользоваться программой:** [руководство на русском](docs/guide.ru.md) — от
-кабеля и настроек порта до девиации Аллана, строки меню и Shortcuts.
-
-There is a user guide in Russian at [docs/guide.ru.md](docs/guide.ru.md); this
-README covers how the thing is built and why. The application itself, its help
-windows and every identifier in the source are in English.
+**User guide:** [English](docs/guide.en.md) · [русский](docs/guide.ru.md) —
+from the cable and the port settings through to Allan deviation, the menu bar and
+Shortcuts. This README covers how the thing is built and why; the guide covers
+using it.
 
 Companion project: [agpsu](../agpsu), the same treatment for the 663x / 661x
 system DC power supplies.
