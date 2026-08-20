@@ -9,9 +9,10 @@ Written from scratch in Swift and SwiftUI. It takes its feature set from
 should do — see [CREDITS.md](CREDITS.md). No code was carried over: the serial
 layer, threading model, graphing, simulator and tests are all original.
 
-![The main window: readout and annunciators across the top, function keys and the
-measurement panels on the left, readings and the event list on the
-right](screen.jpg)
+![The main window connected to the built-in simulator: the reading and its
+annunciators across the top with the running statistics beside them, the function
+keys and measurement panels on the left, and the live graph over the reading
+table on the right](screen.jpg)
 
 Companion project: [agpsu](../agpsu), the same treatment for the 663x / 661x
 system DC power supplies.
