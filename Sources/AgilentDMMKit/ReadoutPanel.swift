@@ -10,6 +10,24 @@ struct ReadoutPanel: View {
     private var controller: DMMController { model.controller }
     private var textColor: Color { model.panelTextColor.color }
 
+    /// Floor under the row holding the reading, so the panel does not collapse
+    /// while there is nothing to show yet — "waiting for a reading" is a third
+    /// the height of the reading it stands in for, and a panel that jumps
+    /// shorter the moment you connect looks broken.
+    ///
+    /// A floor, not a height. It was `frame(height:)`, which is shorter than
+    /// both the 64-point reading and the five rows of statistics beside it — and
+    /// SwiftUI does not clip an oversized child, it draws it straight over its
+    /// neighbours. The reading went through the annunciators above and the
+    /// timestamp through the σ row below. It only showed once a meter was
+    /// connected and there was a timestamp for the statistics to land on, which
+    /// is why every screenshot taken before then looked right.
+    ///
+    /// Injectable so a test can render the panel with the floor removed and
+    /// check the two come out the same height: whenever there is content, the
+    /// floor must not be what decides the size.
+    var minimumReadingRowHeight: CGFloat = 72
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             annunciators
@@ -32,7 +50,7 @@ struct ReadoutPanel: View {
 
                 statisticsBlock
             }
-            .frame(height: 72, alignment: .center)
+            .frame(minHeight: minimumReadingRowHeight, alignment: .center)
 
             statusLine
         }

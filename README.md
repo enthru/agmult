@@ -27,7 +27,7 @@ system DC power supplies.
 
 ```sh
 swift build                  # build everything
-swift test                   # 191 tests, including a full loop against the simulator
+swift test                   # 192 tests, including a full loop against the simulator
 ./Scripts/make-app.sh        # assemble build/AgilentDMM.app
 open build/AgilentDMM.app
 ```

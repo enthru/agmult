@@ -127,6 +127,22 @@ final class InterfaceRenderTests: XCTestCase {
         try write(image, named: "readout-panel.png")
     }
 
+    /// The reading row used to be pinned to a fixed height shorter than its own
+    /// contents, and an oversized child in SwiftUI is not clipped — it is drawn
+    /// over whatever is next to it. Rendering the panel with the floor taken
+    /// away must give the same height as rendering it normally: with content
+    /// present, the floor is not what decides the size.
+    func testTheReadingRowIsSizedByItsContentsRatherThanClampedToAFixedHeight() throws {
+        XCTAssertTrue(model.controller.readingIsValid,
+                      "the collision only appears once there is a reading and a timestamp to collide")
+
+        let withFloor = try naturalHeight(of: ReadoutPanel().environment(model), width: 940)
+        let withoutFloor = try naturalHeight(of: ReadoutPanel(minimumReadingRowHeight: 0).environment(model),
+                                             width: 940)
+        XCTAssertEqual(withFloor, withoutFloor, accuracy: 0.5,
+                       "the row is being clamped to \(withFloor - withoutFloor) points less than it needs")
+    }
+
     func testControlPanelsRender() throws {
         try write(try render(FunctionBar().environment(model), size: CGSize(width: 700, height: 90)),
                   named: "panel-function.png")
@@ -258,6 +274,14 @@ final class InterfaceRenderTests: XCTestCase {
         let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
         renderer.scale = 2
         return try XCTUnwrap(renderer.nsImage, "the view failed to render")
+    }
+
+    /// The height a view takes when only its width is decided for it — which is
+    /// what a layout that overflows its own frame will not report honestly.
+    private func naturalHeight(of view: some View, width: CGFloat) throws -> CGFloat {
+        let renderer = ImageRenderer(content: view.frame(width: width))
+        renderer.scale = 2
+        return try XCTUnwrap(renderer.nsImage, "the view failed to render").size.height
     }
 
     private func write(_ image: NSImage, named name: String) throws {
