@@ -36,6 +36,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>34401A Multimeter</string>
     <key>CFBundleExecutable</key>
     <string>AgilentDMM</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.agmult.AgilentDMM</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -55,6 +57,30 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# The application icon, if there is one to build it from.
+#
+# The artwork is deliberately not in the repository: drop a square icon.png in
+# the root and it is picked up, leave it out and the app gets the generic icon.
+# Every size macOS wants is a downscale of that one file, and iconutil needs all
+# ten — the Finder picks by size, and a missing one is a blank icon at exactly
+# that size rather than an obvious failure.
+ICON_SOURCE="$ROOT/icon.png"
+if [[ -f "$ICON_SOURCE" ]]; then
+    echo "Building the icon…"
+    ICONSET="$(mktemp -d)/AppIcon.iconset"
+    mkdir -p "$ICONSET"
+    for size in 16 32 128 256 512; do
+        sips -z "$size" "$size" "$ICON_SOURCE" \
+            --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+        sips -z "$((size * 2))" "$((size * 2))" "$ICON_SOURCE" \
+            --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    iconutil --convert icns "$ICONSET" --output "$APP/Contents/Resources/AppIcon.icns"
+    rm -rf "$(dirname "$ICONSET")"
+else
+    echo "No icon.png in the repository root — the app gets the generic icon."
+fi
 
 # App Intents metadata — what makes the intents in Intents.swift visible to
 # Shortcuts, Spotlight and Siri.

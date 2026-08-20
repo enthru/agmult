@@ -3,3 +3,7 @@
 build/
 *.xcodeproj
 .DS_Store
+
+# The icon artwork itself is not tracked; make-app.sh builds the .icns from
+# whatever icon.png is sitting in the root, and the app builds fine without one.
+icon.png
