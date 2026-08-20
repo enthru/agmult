@@ -113,10 +113,15 @@ ICONJSON
             --output-partial-info-plist "$ICON_WORK/icon.plist" \
             --platform macosx --minimum-deployment-target 26.0 --target-device mac \
             --compile "$APP/Contents/Resources" "$ICON_WORK/AppIcon.icon" >/dev/null
-    else
-        echo "  no Xcode: building the icon macOS used before 26"
-        swift "$ROOT/Scripts/make-icon.swift" --icns "$ICON_SOURCE" "$APP/Contents/Resources/AppIcon.icns"
     fi
+
+    # The .icns last, over whatever actool left behind. It writes one holding
+    # four sizes — 16, 16@2x, 128, 128@2x — which is enough for the Dock, where
+    # the new format is doing the work anyway, and not enough for the Finder,
+    # which wants 32 and 64 for its list and icon views and draws nothing when
+    # they are missing. This one has all ten.
+    swift "$ROOT/Scripts/make-icon.swift" --icns "$ICON_SOURCE" "$APP/Contents/Resources/AppIcon.icns"
+
 
     rm -rf "$ICON_WORK"
 else
