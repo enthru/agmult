@@ -4,6 +4,70 @@ import XCTest
 /// The wire protocol, checked without a serial port in sight.
 final class ProtocolTests: XCTestCase {
 
+    // MARK: - The ratio function
+
+    func testTheRatioIsSelectedByItsOwnNameButSetUpThroughDCVolts() {
+        // The one function whose settings do not live under its own name: the
+        // meter has a single VOLTage:DC node and the ratio runs on it.
+        XCTAssertEqual(SCPI.configure(.dcRatio), "CONF:VOLT:DC:RAT")
+        XCTAssertEqual(SCPI.selectFunction(.dcRatio), "FUNC \"VOLT:DC:RAT\"")
+        XCTAssertEqual(SCPI.integrationTimeQuery(.dcRatio), "VOLT:DC:NPLC?")
+        XCTAssertEqual(SCPI.rangeQuery(.dcRatio), "VOLT:DC:RANG?")
+        XCTAssertEqual(SCPI.setRange(.dcRatio, 10), "VOLT:DC:RANG 10")
+        XCTAssertEqual(MeasurementFunction.dcRatio.parameterFunction, .dcVoltage)
+    }
+
+    func testTheRatioIsRecognisedWhicheverWayTheMeterAbbreviatesIt() {
+        // The manual says only that FUNCtion? "returns a quoted string", so each
+        // plausible spelling is accepted rather than guessed at.
+        for token in ["VOLT:RAT", "VOLT:DC:RAT", "\"VOLT:RAT\"", "volt:dc:ratio"] {
+            XCTAssertEqual(MeasurementFunction.from(queryToken: token), .dcRatio, "token \(token)")
+        }
+        XCTAssertEqual(MeasurementFunction.from(queryToken: "VOLT"), .dcVoltage)
+        XCTAssertEqual(MeasurementFunction.from(queryToken: "VOLT:DC"), .dcVoltage)
+        XCTAssertEqual(MeasurementFunction.from(queryToken: "VOLT:AC"), .acVoltage)
+    }
+
+    func testTheRatioCarriesNoUnitButStillHasAVoltageRange() {
+        XCTAssertEqual(MeasurementFunction.dcRatio.unit, "")
+        XCTAssertEqual(MeasurementFunction.dcRatio.rangeUnit, "V")
+        XCTAssertEqual(MeasurementFunction.dcRatio.ranges, MeasurementFunction.dcVoltage.ranges)
+        XCTAssertTrue(MeasurementFunction.dcRatio.usesIntegrationTime)
+    }
+
+    // MARK: - The error queue
+
+    func testAnErrorCodeIsReadFromTheFirstFieldNotTheWholeEntry() {
+        XCTAssertEqual(SCPIParse.errorCode("+0,\"No error\""), 0)
+        XCTAssertEqual(SCPIParse.errorCode("-113,\"Undefined header\""), -113)
+        XCTAssertEqual(SCPIParse.errorCode("-350,\"Queue overflow\""), -350)
+        // The entry as a whole is not a number, which is why `number()` is not
+        // the tool for this job.
+        XCTAssertNil(SCPIParse.number("-113,\"Undefined header\""))
+    }
+
+    func testOnlyTheNoErrorEntryCountsAsAnEmptyQueue() {
+        XCTAssertTrue(SCPIParse.isQueueEmpty("+0,\"No error\""))
+        XCTAssertFalse(SCPIParse.isQueueEmpty("-113,\"Undefined header\""))
+        // A reply nobody can parse stops the drain rather than spinning it.
+        XCTAssertTrue(SCPIParse.isQueueEmpty("gibberish"))
+        XCTAssertTrue(SCPIParse.isQueueEmpty(nil))
+    }
+
+    func testTheBurstCeilingIsTheMetersOwnMemory() {
+        XCTAssertEqual(MeterConfiguration.sampleCountChoices.last, 512)
+        XCTAssertTrue(MeterConfiguration.sampleCountChoices.allSatisfy { $0 >= 1 })
+        XCTAssertEqual(SCPI.setSampleCount(512), "SAMP:COUN 512")
+    }
+
+    func testCalibrationSummaryReadsAsASentenceOrNotAtAll() {
+        XCTAssertEqual(CalibrationInfo(count: 42, message: "CAL 2-1-96").summary,
+                       "Calibrated 42 times — \"CAL 2-1-96\"")
+        XCTAssertEqual(CalibrationInfo(count: 42, message: nil).summary, "Calibrated 42 times")
+        XCTAssertNil(CalibrationInfo(count: nil, message: nil).summary)
+        XCTAssertTrue(CalibrationInfo(count: nil, message: nil).isEmpty)
+    }
+
     // MARK: - Command spelling
 
     func testCommandsAreSpelledTheWayTheMeterExpects() {

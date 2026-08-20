@@ -8,8 +8,11 @@ public enum DMMJob: Sendable {
     case commands([String], log: String?)
     /// `*RST` followed by a forced re-read of the whole configuration.
     case reset
-    /// Read one entry from the meter's error queue.
+    /// Empty the meter's error queue, reporting every entry that was in it.
     case readError
+    /// `CAL:COUNt?` and `CAL:STRing?` — how many times the meter has been
+    /// calibrated and what the last person to do it wrote down.
+    case readCalibration
     /// `*TST?` — the meter's own self test. Takes several seconds.
     case selfTest
     /// Take one reading and make it the null offset, the way the front panel's
@@ -47,7 +50,9 @@ public struct DMMSnapshot: Sendable {
     public var questionableCondition: Int?
     public var instrumentStatistics: InstrumentStatistics?
     public var capturedNullOffset: Double?
-    public var errorText: String?
+    /// Every entry the error queue held, oldest first; empty when it was clean.
+    public var errorEntries: [String]?
+    public var calibration: CalibrationInfo?
     public var selfTestResult: String?
     public var logs: [String] = []
     public var failure: String?
@@ -217,7 +222,7 @@ public final class DMMWorker: @unchecked Sendable {
         snapshot.timestamp = started
 
         do {
-            try run(jobs: settings.jobs, into: &snapshot)
+            try run(settings, into: &snapshot)
             try poll(settings, into: &snapshot)
         } catch {
             snapshot.failure = error.localizedDescription
@@ -241,8 +246,8 @@ public final class DMMWorker: @unchecked Sendable {
 
     // MARK: - Jobs
 
-    private func run(jobs: [DMMJob], into snapshot: inout DMMSnapshot) throws {
-        for job in jobs {
+    private func run(_ settings: Settings, into snapshot: inout DMMSnapshot) throws {
+        for job in settings.jobs {
             switch job {
             case .commands(let commands, let log):
                 try device.send(commands)
@@ -256,9 +261,18 @@ public final class DMMWorker: @unchecked Sendable {
                 invalidateConfiguration()
 
             case .readError:
-                let response = device.query(SCPI.errorQuery) ?? "?"
-                snapshot.errorText = response
-                snapshot.logs.append("Error queue: \(response)")
+                let entries = device.drainErrorQueue()
+                snapshot.errorEntries = entries
+                if entries.isEmpty {
+                    snapshot.logs.append("Error queue: empty")
+                } else {
+                    snapshot.logs.append(contentsOf: entries.map { "Error queue: \($0)" })
+                }
+
+            case .readCalibration:
+                let calibration = device.readCalibration(compound: settings.compound)
+                snapshot.calibration = calibration
+                snapshot.logs.append(calibration.summary ?? "The meter did not report its calibration")
 
             case .selfTest:
                 // The self test takes several seconds and answers 0 for pass.

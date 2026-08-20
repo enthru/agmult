@@ -3,9 +3,10 @@ import DMMCore
 
 /// Function keys, laid out like the top row of the meter's own front panel.
 ///
-/// A row rather than a column: ten short labels side by side cost sixty points
-/// of height, where the same ten stacked in a narrow box cost three hundred and
-/// pushed everything below them off the screen.
+/// A row rather than a column: eleven short labels side by side cost sixty
+/// points of height, where the same eleven stacked in a narrow box cost three
+/// hundred and pushed everything below them off the screen. The grid is
+/// adaptive, so a narrow window wraps them rather than clipping.
 struct FunctionBar: View {
     @Environment(AppModel.self) private var model
 
@@ -436,6 +437,10 @@ struct UtilityBox: View {
                     controller.setInstrumentBeeper(beeperIsOn)
                 }
                 Button("Self Test") { controller.runSelfTest() }
+                Button(controller.frontPanelIsLocked ? "Unlock Panel" : "Lock Panel") {
+                    controller.setFrontPanelLockout(!controller.frontPanelIsLocked)
+                }
+                .help("SYST:RWL — disables every front-panel key, the LOCAL key included")
                 Button("Local") { controller.returnToLocal() }
                     .help("Hand the front panel back without disconnecting")
                 Button("Clear I/O") { controller.clearInterface() }
@@ -468,6 +473,7 @@ struct InstrumentStrip: View {
 
                 Text(controller.identity?.model ?? "No meter")
                     .fontWeight(.medium)
+                    .help(controller.calibration?.summary ?? "")
 
                 if let firmware = controller.identity?.firmware, !firmware.isEmpty {
                     Text(firmware).foregroundStyle(.secondary)

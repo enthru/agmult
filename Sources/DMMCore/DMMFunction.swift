@@ -1,8 +1,11 @@
 import Foundation
 
-/// The ten things a 34401A can measure, in front-panel order.
+/// The eleven things a 34401A can measure: the ten front-panel keys, plus the
+/// dc:dc ratio, which on the meter itself lives in the Shift-Meas menu rather
+/// than on a key of its own.
 public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Sendable {
     case dcVoltage
+    case dcRatio
     case acVoltage
     case dcCurrent
     case acCurrent
@@ -18,6 +21,7 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
     public var title: String {
         switch self {
         case .dcVoltage: return "DC Voltage"
+        case .dcRatio: return "DC Voltage Ratio"
         case .acVoltage: return "AC Voltage"
         case .dcCurrent: return "DC Current"
         case .acCurrent: return "AC Current"
@@ -34,6 +38,7 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
     public var shortTitle: String {
         switch self {
         case .dcVoltage: return "DCV"
+        case .dcRatio: return "RATIO"
         case .acVoltage: return "ACV"
         case .dcCurrent: return "DCI"
         case .acCurrent: return "ACI"
@@ -46,8 +51,11 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
         }
     }
 
+    /// A ratio is a quotient of two voltages and carries no unit at all, which
+    /// the formatter reads as "spend every digit on the number itself".
     public var unit: String {
         switch self {
+        case .dcRatio: return ""
         case .dcVoltage, .acVoltage, .diode: return "V"
         case .dcCurrent, .acCurrent: return "A"
         case .resistance, .resistance4Wire, .continuity: return "Ω"
@@ -56,10 +64,15 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
         }
     }
 
-    /// SCPI subsystem root — the prefix `CONFigure`, `RANGe` and `NPLC` hang off.
+    /// SCPI subsystem root that `RANGe`, `NPLC` and `RESolution` hang off.
+    ///
+    /// The ratio answers `VOLT:DC` here rather than a node of its own: it has no
+    /// settings the meter keeps separately — it runs on the DC voltage range and
+    /// integration time, and the reference on the Sense terminals is always
+    /// auto-ranged, which is not something to configure either.
     public var scpiRoot: String {
         switch self {
-        case .dcVoltage: return "VOLT:DC"
+        case .dcVoltage, .dcRatio: return "VOLT:DC"
         case .acVoltage: return "VOLT:AC"
         case .dcCurrent: return "CURR:DC"
         case .acCurrent: return "CURR:AC"
@@ -72,13 +85,43 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
         }
     }
 
+    /// What `FUNCtion` and `CONFigure` call this function when selecting it.
+    /// Only the ratio differs from `scpiRoot`, because only the ratio is a
+    /// function whose settings live somewhere other than its own name.
+    public var selectionRoot: String {
+        self == .dcRatio ? "VOLT:DC:RAT" : scpiRoot
+    }
+
+    /// Whose range and integration time this function actually uses — itself,
+    /// except for the ratio, which borrows DC volts'.
+    public var parameterFunction: MeasurementFunction {
+        self == .dcRatio ? .dcVoltage : self
+    }
+
     /// What `FUNCtion?` answers with. Note the asymmetry the meter insists on:
     /// you select DC volts with `"VOLTage:DC"` but it reports back `"VOLT"`.
     public var queryToken: String {
         switch self {
         case .dcVoltage: return "VOLT"
+        case .dcRatio: return "VOLT:RAT"
         case .dcCurrent: return "CURR"
         default: return scpiRoot
+        }
+    }
+
+    /// Every spelling a read-back may legitimately use for this function.
+    ///
+    /// The manual lists what to *send* but says only that `FUNCtion?` "returns a
+    /// quoted string", and the ratio is where that matters: the meter drops the
+    /// `DC` the selection string carries. Accepting each plausible abbreviation
+    /// costs nothing and stops a read-back from deciding, on a spelling, that
+    /// somebody changed the function on the front panel.
+    public var acceptedQueryTokens: [String] {
+        switch self {
+        case .dcVoltage: return ["VOLT", "VOLT:DC"]
+        case .dcRatio: return ["VOLT:RAT", "VOLT:DC:RAT", "VOLT:RATIO", "VOLT:DC:RATIO"]
+        case .dcCurrent: return ["CURR", "CURR:DC"]
+        default: return [queryToken]
         }
     }
 
@@ -86,7 +129,7 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
         let token = raw
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t\r\n"))
             .uppercased()
-        return allCases.first { $0.queryToken == token }
+        return allCases.first { $0.acceptedQueryTokens.contains(token) }
     }
 
     /// Measurement ranges, in volts / amps / ohms.
@@ -95,7 +138,7 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
     /// counter's front end uses, which is what `FREQ:VOLTage:RANGe` sets.
     public var ranges: [Double] {
         switch self {
-        case .dcVoltage: return [0.1, 1, 10, 100, 1000]
+        case .dcVoltage, .dcRatio: return [0.1, 1, 10, 100, 1000]
         case .acVoltage: return [0.1, 1, 10, 100, 750]
         case .dcCurrent: return [0.01, 0.1, 1, 3]
         case .acCurrent: return [1, 3]
@@ -110,7 +153,10 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
     /// where the range is a signal amplitude rather than a frequency.
     public var rangeUnit: String {
         switch self {
-        case .frequency, .period: return "V"
+        // The counter's range is the amplitude its front end must cope with,
+        // and the ratio's is the voltage on the Input terminals — in both cases
+        // a voltage, even though the reading is not one.
+        case .frequency, .period, .dcRatio: return "V"
         default: return unit
         }
     }
@@ -134,7 +180,7 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
     /// functions. AC uses a filter bandwidth and the counter uses a gate time.
     public var usesIntegrationTime: Bool {
         switch self {
-        case .dcVoltage, .dcCurrent, .resistance, .resistance4Wire: return true
+        case .dcVoltage, .dcRatio, .dcCurrent, .resistance, .resistance4Wire: return true
         default: return false
         }
     }
@@ -159,6 +205,7 @@ public enum MeasurementFunction: String, CaseIterable, Identifiable, Codable, Se
         switch self {
         case .dcCurrent, .acCurrent: return "Input HI and the I terminal"
         case .resistance4Wire: return "Input HI/LO plus Sense HI/LO"
+        case .dcRatio: return "the signal on Input HI/LO, its reference on Sense HI/LO"
         default: return "Input HI and LO"
         }
     }

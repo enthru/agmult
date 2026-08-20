@@ -23,7 +23,7 @@ system DC power supplies.
 
 ```sh
 swift build                  # build everything
-swift test                   # 167 tests, including a full loop against the simulator
+swift test                   # 191 tests, including a full loop against the simulator
 ./Scripts/make-app.sh        # assemble build/AgilentDMM.app
 open build/AgilentDMM.app
 ```
@@ -88,13 +88,15 @@ when you want the trace on its own screen.
   state, and the running statistics beside it. The SI prefix comes from the *range* and the decimals from the
   *resolution*, so a 6½-digit reading looks like one and a value drifting around
   zero does not flip between µV and mV several times a second.
-- **All ten functions** — DC and AC volts, DC and AC current, 2- and 4-wire
-  resistance, frequency, period, continuity and diode test.
+- **All eleven functions** — DC and AC volts, DC and AC current, 2- and 4-wire
+  resistance, frequency, period, continuity, diode test, and the dc:dc ratio,
+  which divides the signal on the Input terminals by a reference on Sense and so
+  reads as a bare number with no unit at all.
 - **Range and resolution** — auto or manual range, integration time from 0.02 to
   100 PLC, counter gate time, AC filter bandwidth, auto zero, and the >10 GΩ
   input on the low DC voltage ranges.
 - **Triggering** — immediate, bus or external, with trigger delay and a burst
-  size that is the real lever on throughput.
+  size up to 512, which is the real lever on throughput.
 - **Meter maths** — null with a one-key capture, dB, dBm against a chosen load,
   the meter's own min/max/average, and limit testing with logging and a beep.
 - **Statistics** — count, minimum, maximum, mean, standard deviation and
@@ -140,6 +142,11 @@ high rate is not to ask more often but to ask for more at once.
 one trigger and returns them all in one response. Combine it with 0.02 PLC, auto
 zero off and the meter's own display switched off — that last one is the single
 biggest speed-up the instrument offers.
+
+The picker stops at 512. `SAMPle:COUNt` itself accepts 50,000, but 512 is what
+the meter's internal memory holds, and past that the burst takes long enough that
+the even spacing this app stamps across it stops being a fair estimate of when
+each reading was actually taken.
 
 The questions themselves are folded together too. A polling pass wants the
 readings, the status register and, now and then, the whole configuration; sent as
@@ -222,7 +229,25 @@ thing that turns into a hung application:
   `OVLD`, and deliberately kept out of the graph — one point at 10³⁷ would
   flatten everything else to a line.
 - The meter answers `"VOLT"` to `FUNCtion?` for DC volts, even though you select
-  it with `"VOLTage:DC"`. The asymmetry is real and is handled in one place.
+  it with `"VOLTage:DC"`. The asymmetry is real and is handled in one place. The
+  ratio is the awkward case: the manual gives the string to *send* but says only
+  that the query "returns a quoted string", so every plausible abbreviation of it
+  is accepted rather than one being guessed at. The ratio also has no settings of
+  its own — range, integration time and auto zero are the `VOLTage:DC` ones, since
+  that is the node the meter keeps them under.
+- **The error queue is a queue.** One `SYSTem:ERRor?` takes one entry off it, so
+  asking once after something went wrong tells you about the first failure and
+  leaves the rest to surface later attached to something innocent. The app reads
+  until the meter says `+0,"No error"`, and every entry goes to the event list.
+- **`SYSTem:RWLock` locks the front panel properly.** Plain remote mode leaves
+  the LOCAL key working, so anybody walking past can take the meter back
+  mid-capture. Lockout disables every key including that one — Config ▸ Lock Out
+  Front Panel, and the same button on the instrument panel. It can only be undone
+  from here, which is the point of it and also the reason it is not the default.
+- **Calibration count and message** are read once per session and shown on the
+  model name in the status strip: how many times the meter has been adjusted and
+  whatever the last person to do it typed in. Read-only — the commands that
+  perform a calibration are deliberately not implemented.
 
 ## Differences from the Windows application
 
@@ -261,9 +286,14 @@ known in closed form: a pure linear drift gives σ(τ) = D·τ/√2 exactly, and
 noise averages down as τ^(−½) with a log-log slope of −½.
 
 Over a real serial connection to the simulator: identification and remote mode,
-all ten functions, auto-ranging and overload, bursts and each trigger source,
+all eleven functions, auto-ranging and overload, bursts up to the meter's full
+512-reading memory and each trigger source,
 compound messages and the read-back that retries when it was aimed at the wrong
-subsystem, the CALC maths, the error queue and reset. Controller tests run the whole polling loop
+subsystem, the CALC maths, the error queue drained to the bottom, the
+calibration read-back, the front-panel lockout and reset. The ratio gets its own
+set: that its range and integration time are the DC voltage ones, that it
+overloads on the Input signal rather than on the quotient, and that a read-back
+still tells it apart from plain DC volts. Controller tests run the whole polling loop
 on the main actor, including a front-panel change being adopted, a limit trip
 being logged once rather than every pass, the data logger writing to disk, a
 meter that stops answering ending the session, and a direct count of the round

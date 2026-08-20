@@ -5,6 +5,25 @@ import XCTest
 /// instrument or looks like a spreadsheet.
 final class FormattingTests: XCTestCase {
 
+    func testADimensionlessRatioSpendsEveryDigitOnTheNumber() {
+        // No unit means no prefix to choose, and the range belongs to the Input
+        // terminals rather than to the quotient, so the decimals come from the
+        // reading's own magnitude — the same count a volts reading of the same
+        // size would get, which is the point.
+        XCTAssertEqual(Format.reading(0.838, unit: "", range: 10, digits: 6), "0.838000")
+        XCTAssertEqual(Format.reading(0.838, unit: "V", range: 1, digits: 6), "0.838000 V")
+        XCTAssertEqual(Format.reading(1.5, unit: "", range: 10, digits: 6), "1.500000")
+        XCTAssertEqual(Format.reading(12.25, unit: "", range: 100, digits: 4), "12.250")
+        // A ratio is not tied to the volts range at all: a 10 V range can carry
+        // a quotient of any size, and the display follows the number.
+        XCTAssertEqual(Format.reading(1234.5, unit: "", range: 10, digits: 6), "1234.500")
+    }
+
+    func testAUnitlessValueIsNotLeftWearingATrailingSpace() {
+        XCTAssertEqual(Format.engineering(0.5, unit: ""), "0.50000")
+        XCTAssertEqual(Format.engineering(0.5, unit: "V"), "500.000 mV")
+    }
+
     /// The prefix comes from the range, not the value, so a reading drifting
     /// around zero does not flip between µV and mV several times a second.
     func testTheRangeChoosesThePrefix() {

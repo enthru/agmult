@@ -25,6 +25,18 @@ public enum SCPI {
     public static let errorQuery = "SYST:ERR?"
     public static let versionQuery = "SYST:VERS?"
 
+    // MARK: Calibration
+
+    /// How many times the meter has been calibrated, counting the one it had
+    /// before it left the factory. Read-only and safe to ask at any time — the
+    /// commands that *perform* a calibration are deliberately not in this file,
+    /// because an instrument miscalibrated by software is an instrument nobody
+    /// can trust again without a standard.
+    public static let calibrationCount = "CAL:COUN?"
+    /// Whatever the last person to calibrate it typed in — by convention a date
+    /// and who did it, though the meter does not care.
+    public static let calibrationMessage = "CAL:STR?"
+
     /// Ctrl-C. Clears whatever the interface was doing and throws away pending
     /// output — the RS-232 stand-in for an IEEE-488 device clear.
     public static let interfaceClear: UInt8 = 0x03
@@ -34,7 +46,7 @@ public enum SCPI {
     public static let functionQuery = "FUNC?"
 
     public static func selectFunction(_ function: MeasurementFunction) -> String {
-        "FUNC \"\(function.scpiRoot)\""
+        "FUNC \"\(function.selectionRoot)\""
     }
 
     /// `CONFigure` is a heavier hammer than `FUNCtion`: as well as choosing the
@@ -42,7 +54,7 @@ public enum SCPI {
     /// to their defaults. Used when the user picks a function from the panel, so
     /// leftovers from the previous one cannot linger.
     public static func configure(_ function: MeasurementFunction) -> String {
-        "CONF:\(function.scpiRoot)"
+        "CONF:\(function.selectionRoot)"
     }
 
     public static func rangeQuery(_ function: MeasurementFunction) -> String {
@@ -262,6 +274,27 @@ public enum SCPIParse {
         return Int(value.rounded())
     }
 
+    /// The numeric code from an error-queue entry: `+0,"No error"` gives 0 and
+    /// `-113,"Undefined header"` gives -113. Note that `number()` cannot be used
+    /// here — the whole entry is not a number, only its first field is.
+    public static func errorCode(_ response: String?) -> Int? {
+        guard let response else { return nil }
+        let field = response
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ",", maxSplits: 1)
+            .first
+            .map(String.init)
+        guard let field, let value = Double(field.trimmingCharacters(in: .whitespaces)) else { return nil }
+        return Int(value.rounded())
+    }
+
+    /// True for the entry the meter returns when the queue is empty. Anything
+    /// unparseable counts as empty too: a reply nobody can read is not an error
+    /// worth showing, and treating it as one would spin the drain loop.
+    public static func isQueueEmpty(_ response: String?) -> Bool {
+        errorCode(response).map { $0 == 0 } ?? true
+    }
+
     /// `ON`, `1` and `+1` all mean the same thing depending on which query asked.
     public static func boolean(_ response: String?) -> Bool? {
         guard let response else { return nil }
@@ -318,6 +351,32 @@ public struct QuestionableStatus: Equatable, Sendable {
         if limitFailedHigh { labels.append("Limit Failed HI") }
         if labels.isEmpty && condition != 0 { labels.append("Questionable (\(condition))") }
         return labels
+    }
+}
+
+/// What the meter says about its own calibration. Both fields are read-only:
+/// the count is how many times it has been adjusted since it was built, and the
+/// message is whatever the last person to do it typed in.
+public struct CalibrationInfo: Equatable, Sendable {
+    public let count: Int?
+    public let message: String?
+
+    public init(count: Int?, message: String?) {
+        self.count = count
+        self.message = message
+    }
+
+    public var isEmpty: Bool { count == nil && (message ?? "").isEmpty }
+
+    /// One line for the event list: `Calibrated 42 times — "CAL 2-1-96"`.
+    public var summary: String? {
+        let text = (message ?? "").trimmingCharacters(in: .whitespaces)
+        switch (count, text.isEmpty) {
+        case (let count?, false): return "Calibrated \(count) times — \"\(text)\""
+        case (let count?, true): return "Calibrated \(count) times"
+        case (nil, false): return "Calibration message: \"\(text)\""
+        case (nil, true): return nil
+        }
     }
 }
 

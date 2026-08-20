@@ -43,6 +43,11 @@ public final class SimulatedSignal: @unchecked Sendable {
         .diode: 0.653,
     ]
 
+    /// The dc reference on the Sense terminals, which the ratio function
+    /// divides the Input signal by. It is not a measurement in its own right —
+    /// no function reads it — so it lives beside the storage rather than in it.
+    public var referenceVoltage: Double = 5
+
     /// Shape laid over the base value.
     public var modulation: Modulation = .drift
     /// Peak amplitude of the modulation, as a fraction of the base value.
@@ -77,6 +82,8 @@ public final class SimulatedSignal: @unchecked Sendable {
     /// The undisturbed physical quantity the meter is looking at.
     public func baseValue(for function: MeasurementFunction) -> Double {
         switch function {
+        case .dcRatio:
+            return referenceVoltage != 0 ? self[.dcVoltage] / referenceVoltage : 0
         case .period:
             let frequency = self[.frequency]
             return frequency > 0 ? 1 / frequency : 0

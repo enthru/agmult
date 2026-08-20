@@ -221,6 +221,38 @@ public final class DMMDevice {
         return true
     }
 
+    /// Empties the meter's error queue, oldest entry first.
+    ///
+    /// The queue is a queue: one `SYSTem:ERRor?` takes one entry off it, so
+    /// asking once after something went wrong tells you about the first thing
+    /// that went wrong and leaves the rest to surface later, attached to
+    /// whatever you do next. Reading until the meter says `+0,"No error"` is the
+    /// only way to know the instrument is actually clean.
+    ///
+    /// The meter holds twenty entries and overwrites the last one with
+    /// `-350,"Queue overflow"` when it fills, so the loop cannot run away; the
+    /// limit is there for the meter that answers something unexpected forever.
+    public func drainErrorQueue(limit: Int = 25) -> [String] {
+        var entries: [String] = []
+        for _ in 0..<max(1, limit) {
+            guard let response = query(SCPI.errorQuery) else { break }
+            if SCPIParse.isQueueEmpty(response) { break }
+            entries.append(response.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return entries
+    }
+
+    /// Reads the calibration count and message in one round trip.
+    public func readCalibration(compound useCompound: Bool = true) -> CalibrationInfo {
+        let queries = [SCPI.calibrationCount, SCPI.calibrationMessage]
+        let answers: [String?] = (useCompound ? queryCompound(queries) : nil) ?? queries.map { query($0) }
+
+        let message = answers[1]?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t\r\n"))
+        return CalibrationInfo(count: SCPIParse.integer(answers[0]),
+                               message: (message?.isEmpty ?? true) ? nil : message)
+    }
+
     public func readInstrumentStatistics(compound useCompound: Bool = true) -> InstrumentStatistics {
         let queries = [SCPI.statisticsMinimum, SCPI.statisticsMaximum,
                        SCPI.statisticsAverage, SCPI.statisticsCount]

@@ -120,6 +120,15 @@ struct AppCommands: Commands {
                 .disabled(!controller.isConnected)
             Button("Clear Interface (Ctrl-C)") { controller.clearInterface() }
                 .disabled(!controller.isConnected)
+            Button("Read Error Queue") { controller.readError() }
+                .disabled(!controller.isConnected)
+            Button("Calibration Info") { controller.readCalibrationInfo() }
+                .disabled(!controller.isConnected)
+            Divider()
+            Button(controller.frontPanelIsLocked ? "Release Front-Panel Lockout" : "Lock Out Front Panel") {
+                controller.setFrontPanelLockout(!controller.frontPanelIsLocked)
+            }
+            .disabled(!controller.isConnected)
             Button("Return to Local") { controller.returnToLocal() }
                 .disabled(!controller.isConnected)
             Divider()

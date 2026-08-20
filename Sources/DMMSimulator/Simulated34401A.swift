@@ -70,6 +70,11 @@ public final class Simulated34401A: @unchecked Sendable {
     public private(set) var isInitiated = false
 
     private var errorQueue: [String] = []
+
+    /// Read-only calibration facts, as a meter that has been round the loop a
+    /// few times would report them.
+    public var calibrationCount = 42
+    public var calibrationMessage = "CAL 2-1-96 GS"
     private let lock = NSLock()
 
     /// Command header → the function it configures, built once so the parser is
@@ -93,7 +98,10 @@ public final class Simulated34401A: @unchecked Sendable {
         var resolution: [String: MeasurementFunction] = [:]
 
         for function in MeasurementFunction.allCases {
-            configure["CONF:" + function.scpiRoot] = function
+            // `CONF:VOLT:DC:RAT` selects the ratio; `VOLT:DC:RANG` and friends
+            // are shared with plain DC volts, and the storage below keys through
+            // `parameterFunction` so both spellings reach the same setting.
+            configure["CONF:" + function.selectionRoot] = function
             if function.hasSelectableRange {
                 range[function.rangeRoot + ":RANG"] = function
                 autoRange[function.rangeRoot + ":RANG:AUTO"] = function
@@ -130,20 +138,24 @@ public final class Simulated34401A: @unchecked Sendable {
 
     // MARK: - Measuring
 
+    /// Range, integration time and their neighbours are stored against the
+    /// function whose subsystem they belong to, so the ratio and plain DC volts
+    /// share one set — which is what the meter does, there being only one
+    /// `VOLTage:DC` node for both to hang off.
     public func range(for function: MeasurementFunction) -> Double {
-        ranges[function] ?? function.ranges.first ?? 1
+        ranges[function.parameterFunction] ?? function.ranges.first ?? 1
     }
 
     public func isAutoRanging(_ function: MeasurementFunction) -> Bool {
-        autoRanges[function] ?? true
+        autoRanges[function.parameterFunction] ?? true
     }
 
     public func integrationTime(for function: MeasurementFunction) -> Double {
-        integrationTimes[function] ?? 1
+        integrationTimes[function.parameterFunction] ?? 1
     }
 
     public func aperture(for function: MeasurementFunction) -> Double {
-        apertures[function] ?? 0.1
+        apertures[function.parameterFunction] ?? 0.1
     }
 
     /// Seconds one reading takes, from the settings in force.
@@ -163,7 +175,30 @@ public final class Simulated34401A: @unchecked Sendable {
     /// is the 9.9E37 sentinel, not a number anybody should plot.
     public func measure() -> Double {
         let effectiveIntegration = function.usesAperture ? aperture(for: function) : integrationTime(for: function) / lineFrequency
-        var value = signal.sample(function: function, integrationTime: max(effectiveIntegration, 1e-4))
+        let aperture = max(effectiveIntegration, 1e-4)
+
+        // The ratio is measured, not read: the meter takes the signal on Input
+        // and the reference on Sense and divides. Ranging and overload apply to
+        // the Input signal — the quotient itself has no range to fall off.
+        if function == .dcRatio {
+            let input = signal.sample(function: .dcVoltage, integrationTime: aperture)
+            if isAutoRanging(function) {
+                ranges[function.parameterFunction] = autoSelectedRange(for: abs(input))
+            }
+            if abs(input) > range(for: function) * 1.2 {
+                flagOverload()
+                return SCPIParse.overloadSentinel
+            }
+            let reference = signal.referenceVoltage
+            // A reference of zero is a division the meter cannot do either.
+            guard abs(reference) > 1e-12 else {
+                flagOverload()
+                return SCPIParse.overloadSentinel
+            }
+            return applyMath(to: input / reference)
+        }
+
+        var value = signal.sample(function: function, integrationTime: aperture)
 
         // The counter functions read the input frequency, not its amplitude, so
         // their range describes the signal the front end has to cope with and
@@ -198,7 +233,7 @@ public final class Simulated34401A: @unchecked Sendable {
 
     private func flagOverload() {
         switch function {
-        case .dcVoltage, .acVoltage, .diode: questionable |= 0x0001
+        case .dcVoltage, .dcRatio, .acVoltage, .diode: questionable |= 0x0001
         case .dcCurrent, .acCurrent: questionable |= 0x0002
         case .resistance, .resistance4Wire, .continuity: questionable |= 0x0200
         case .frequency, .period: questionable |= 0x0001
@@ -372,8 +407,9 @@ public final class Simulated34401A: @unchecked Sendable {
         if header == "FUNC" {
             if isQuery { return Reply(value: "\"\(function.queryToken)\"") }
             let token = argument.trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            let canonicalToken = Self.canonical(token.uppercased())
             guard let selected = MeasurementFunction.allCases.first(where: {
-                Self.canonical(token.uppercased()) == $0.scpiRoot || token.uppercased() == $0.queryToken
+                canonicalToken == $0.selectionRoot || $0.acceptedQueryTokens.contains(canonicalToken)
             }) else {
                 pushError("-224,\"Illegal parameter value\"")
                 return Reply(value: nil)
@@ -385,10 +421,10 @@ public final class Simulated34401A: @unchecked Sendable {
         if let selected = configureCommands[header], !isQuery {
             // CONFigure resets that function's range, resolution and triggering.
             function = selected
-            autoRanges[selected] = true
-            ranges[selected] = selected.ranges.first ?? 1
-            integrationTimes[selected] = 1
-            apertures[selected] = 0.1
+            autoRanges[selected.parameterFunction] = true
+            ranges[selected.parameterFunction] = selected.ranges.first ?? 1
+            integrationTimes[selected.parameterFunction] = 1
+            apertures[selected.parameterFunction] = 0.1
             triggerSource = "IMM"
             triggerDelayAuto = true
             sampleCount = 1
@@ -402,8 +438,8 @@ public final class Simulated34401A: @unchecked Sendable {
                 return Reply(value: number(wantsMaximum ? (selected.ranges.last ?? 1) : range(for: selected)))
             }
             let requested = value(argument, maximum: selected.ranges.last ?? 1)
-            ranges[selected] = nearestRange(atLeast: requested, in: selected.ranges)
-            autoRanges[selected] = false
+            ranges[selected.parameterFunction] = nearestRange(atLeast: requested, in: selected.ranges)
+            autoRanges[selected.parameterFunction] = false
             return Reply(value: nil)
         }
 
@@ -411,10 +447,10 @@ public final class Simulated34401A: @unchecked Sendable {
             if isQuery { return Reply(value: isAutoRanging(selected) ? "1" : "0") }
             let token = argument.uppercased()
             if token.hasPrefix("ONCE") {
-                autoRanges[selected] = false
-                ranges[selected] = autoSelectedRange(for: abs(signal.baseValue(for: selected)))
+                autoRanges[selected.parameterFunction] = false
+                ranges[selected.parameterFunction] = autoSelectedRange(for: abs(signal.baseValue(for: selected)))
             } else {
-                autoRanges[selected] = booleanValue(argument)
+                autoRanges[selected.parameterFunction] = booleanValue(argument)
             }
             return Reply(value: nil)
         }
@@ -423,7 +459,7 @@ public final class Simulated34401A: @unchecked Sendable {
             if isQuery { return Reply(value: number(integrationTime(for: selected))) }
             let requested = value(argument, maximum: 100)
             guard let snapped = SCPIParse.nearestIntegrationTime(requested) else { return Reply(value: nil) }
-            integrationTimes[selected] = snapped.rawValue
+            integrationTimes[selected.parameterFunction] = snapped.rawValue
             return Reply(value: nil)
         }
 
@@ -431,7 +467,7 @@ public final class Simulated34401A: @unchecked Sendable {
             if isQuery { return Reply(value: number(aperture(for: selected))) }
             let requested = value(argument, maximum: 1)
             guard let snapped = SCPIParse.nearestGateTime(requested) else { return Reply(value: nil) }
-            apertures[selected] = snapped.rawValue
+            apertures[selected.parameterFunction] = snapped.rawValue
             return Reply(value: nil)
         }
 
@@ -622,6 +658,10 @@ public final class Simulated34401A: @unchecked Sendable {
             return Reply(value: errorQueue.isEmpty ? "+0,\"No error\"" : errorQueue.removeFirst())
         case ("SYST:VERS", true):
             return Reply(value: model.scpiVersion)
+        case ("CAL:COUN", true):
+            return Reply(value: "+\(calibrationCount)")
+        case ("CAL:STR", true):
+            return Reply(value: "\"\(calibrationMessage)\"")
         case ("SYST:BEEP", false):
             return Reply(value: nil)
         case ("SYST:BEEP:STAT", true):
@@ -731,6 +771,8 @@ public final class Simulated34401A: @unchecked Sendable {
             "VERSION": "VERS", "REMOTE": "REM", "LOCAL": "LOC",
             "BEEPER": "BEEP", "DISPLAY": "DISP", "CLEAR": "CLE",
             "POINTS": "POIN", "AUTO": "AUTO", "LEVEL": "LEV",
+            "RATIO": "RAT", "CALIBRATION": "CAL", "STRING": "STR",
+            "RWLOCK": "RWL",
         ]
         return header
             .split(separator: ":", omittingEmptySubsequences: false)

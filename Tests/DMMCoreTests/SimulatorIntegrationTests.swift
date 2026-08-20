@@ -132,6 +132,58 @@ final class SimulatorIntegrationTests: XCTestCase {
         }
     }
 
+    func testTheRatioIsTheInputDividedByTheSenseReference() throws {
+        _ = try device.identify()
+        server.signal[.dcVoltage] = 4.19
+        server.simulatedMeter.signal.referenceVoltage = 5
+
+        try device.send(SCPI.configure(.dcRatio))
+        let value = try XCTUnwrap(device.queryNumber(SCPI.read))
+        XCTAssertEqual(value, 4.19 / 5, accuracy: 1e-6)
+
+        // Changing the reference alone moves the reading, which is the whole
+        // point of the function: it is a comparison, not a measurement.
+        server.simulatedMeter.signal.referenceVoltage = 10
+        XCTAssertEqual(try XCTUnwrap(device.queryNumber(SCPI.read)), 0.419, accuracy: 1e-6)
+    }
+
+    func testTheRatioOverloadsOnTheInputSignalNotOnTheQuotient() throws {
+        _ = try device.identify()
+        try device.send(SCPI.configure(.dcRatio))
+        try device.send(SCPI.setRange(.dcRatio, 1))
+        // A quotient of 0.419 is a perfectly ordinary number; the 4.19 V on the
+        // Input terminals is what the 1 V range cannot take.
+        server.signal[.dcVoltage] = 4.19
+        server.simulatedMeter.signal.referenceVoltage = 10
+
+        XCTAssertTrue(SCPIParse.isOverload(try XCTUnwrap(device.queryNumber(SCPI.read))))
+        let status = QuestionableStatus(condition: try XCTUnwrap(SCPIParse.integer(device.query(SCPI.questionableCondition))))
+        XCTAssertTrue(status.voltageOverload)
+    }
+
+    func testTheRatioAndDCVoltsShareOneSetOfSettingsAndStillReadBackApart() throws {
+        _ = try device.identify()
+        try device.send(SCPI.configure(.dcRatio))
+        try device.send(SCPI.setRange(.dcRatio, 100))
+        try device.send(SCPI.setIntegrationTime(.dcRatio, .slow))
+
+        var configuration = MeterConfiguration()
+        device.readConfiguration(into: &configuration)
+        XCTAssertEqual(configuration.function, .dcRatio, "the ratio must not be mistaken for plain DC volts")
+        XCTAssertEqual(configuration.range, 100)
+        XCTAssertEqual(configuration.integrationTime, .slow)
+
+        // The settings were written to the VOLTage:DC node, so DC volts inherits
+        // them — one node, as on the meter.
+        try device.send(SCPI.selectFunction(.dcVoltage))
+        var afterwards = MeterConfiguration()
+        afterwards.function = .dcVoltage
+        device.readConfiguration(into: &afterwards)
+        XCTAssertEqual(afterwards.function, .dcVoltage)
+        XCTAssertEqual(afterwards.range, 100)
+        XCTAssertEqual(afterwards.integrationTime, .slow)
+    }
+
     func testPeriodIsTheReciprocalOfFrequency() throws {
         _ = try device.identify()
         server.signal[.frequency] = 2000
@@ -153,6 +205,20 @@ final class SimulatorIntegrationTests: XCTestCase {
         let values = SCPIParse.numbers(device.query(SCPI.read))
         XCTAssertEqual(values.count, 20)
         XCTAssertTrue(values.allSatisfy { abs($0 - 4.19) < 0.001 })
+    }
+
+    func testTheLargestBurstTheMetersMemoryHoldsComesBackWhole() throws {
+        _ = try device.identify()
+        try device.send(SCPI.configure(.dcVoltage))
+        try device.send(SCPI.setSampleCount(MeterConfiguration.sampleCountChoices.last!))
+        // Five hundred readings is several kilobytes in one reply, which is a
+        // different thing for the serial layer to survive than twenty is.
+        device.setReadTimeout(10)
+
+        let values = SCPIParse.numbers(device.query(SCPI.read))
+        XCTAssertEqual(values.count, 512)
+        XCTAssertTrue(values.allSatisfy { abs($0 - 4.19) < 0.001 })
+        XCTAssertEqual(server.simulatedMeter.sampleCount, 512)
     }
 
     func testBusTriggerNeedsInitiateThenTriggerThenFetch() throws {
@@ -433,6 +499,67 @@ final class SimulatorIntegrationTests: XCTestCase {
         _ = try device.identify()
         try device.send("NOSUCH:COMMAND 1")
         XCTAssertEqual(device.query(SCPI.errorQuery), "-113,\"Undefined header\"")
+    }
+
+    func testDrainingTheQueueTakesEveryEntryNotJustTheFirst() throws {
+        _ = try device.identify()
+        try device.send("NOSUCH:COMMAND 1")
+        try device.send("ALSO:WRONG 2")
+        try device.send("STILL:WRONG 3")
+
+        let entries = device.drainErrorQueue()
+        XCTAssertEqual(entries.count, 3, "one query per entry leaves the rest behind")
+        XCTAssertTrue(entries.allSatisfy { $0.hasPrefix("-113") }, "got \(entries)")
+
+        // And the queue is genuinely empty afterwards, rather than one shorter.
+        XCTAssertTrue(device.drainErrorQueue().isEmpty)
+        XCTAssertEqual(device.query(SCPI.errorQuery), "+0,\"No error\"")
+    }
+
+    func testDrainingACleanQueueAsksOnceAndStops() throws {
+        _ = try device.identify()
+        XCTAssertTrue(device.drainErrorQueue().isEmpty)
+    }
+
+    func testCalibrationCountAndMessageComeBackInOneRoundTrip() throws {
+        _ = try device.identify()
+        server.simulatedMeter.calibrationCount = 7
+        server.simulatedMeter.calibrationMessage = "CAL 2020-09-21"
+
+        let calibration = device.readCalibration()
+        XCTAssertEqual(calibration.count, 7)
+        XCTAssertEqual(calibration.message, "CAL 2020-09-21", "the quotes belong to SCPI, not to the message")
+        XCTAssertEqual(calibration.summary, "Calibrated 7 times — \"CAL 2020-09-21\"")
+
+        // The same answers when the queries are sent one at a time, which is
+        // what a meter that chokes on compound messages would get.
+        XCTAssertEqual(device.readCalibration(compound: false), calibration)
+    }
+
+    func testLockingOutTheFrontPanelDisablesTheLocalKeyToo() throws {
+        _ = try device.identify()
+        XCTAssertTrue(server.simulatedMeter.isRemote)
+        XCTAssertFalse(server.simulatedMeter.isLockedOut)
+
+        try device.send(SCPI.remoteWithLockout)
+        try waitForMeter("the lockout to arrive") { self.server.simulatedMeter.isLockedOut }
+        XCTAssertTrue(server.simulatedMeter.isRemote, "lockout is remote mode with the LOCAL key taken away")
+
+        try device.send(SCPI.remote)
+        try waitForMeter("the lockout to be released") { !self.server.simulatedMeter.isLockedOut }
+    }
+
+    /// Commands that produce no reply are fire-and-forget: the simulator's
+    /// reader thread needs a moment before the effect can be asserted on.
+    private func waitForMeter(_ description: String,
+                              timeout: TimeInterval = 2,
+                              _ condition: () -> Bool) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            usleep(5000)
+        }
+        XCTFail("timed out waiting for \(description)")
     }
 
     func testResetReturnsTheMeterToItsPowerOnState() throws {

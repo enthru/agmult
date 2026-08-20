@@ -23,7 +23,13 @@ public struct MeterConfiguration: Sendable, Equatable, Codable {
     /// extra in serial round trips, which is where the sample rate comes from.
     public var sampleCount: Int = 1
 
-    public static let sampleCountChoices = [1, 2, 5, 10, 20, 50, 100]
+    /// `SAMPle:COUNt` itself goes to 50,000, but the meter holds 512 readings
+    /// in internal memory and that is the honest ceiling: past it the stored
+    /// reading path is unusable, one burst takes long enough that the even
+    /// spacing this app stamps across it stops being a fair estimate, and a
+    /// single reply grows past anything a 9600-baud line should be asked to
+    /// carry in one go.
+    public static let sampleCountChoices = [1, 2, 5, 10, 20, 50, 100, 200, 512]
 
     public init() {}
 

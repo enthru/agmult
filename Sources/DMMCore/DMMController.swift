@@ -89,6 +89,8 @@ public final class DMMController {
     public private(set) var questionableIsKnown = false
     public private(set) var instrumentStatistics = InstrumentStatistics()
     public private(set) var errorText = "—"
+    /// What the meter says about its own calibration, once it has been asked.
+    public private(set) var calibration: CalibrationInfo?
     public var message = ""
 
     public var readingIsValid: Bool { latestReading != nil && !isOverloaded }
@@ -207,8 +209,13 @@ public final class DMMController {
         // Put the meter into a known state that matches the panel before the
         // first reading is taken, so nothing is measured under the previous
         // user's settings.
-        worker.enqueue(.commands([SCPI.remote, SCPI.clearStatus] + configuration.commands() + math.commands(),
+        worker.enqueue(.commands([frontPanelIsLocked ? SCPI.remoteWithLockout : SCPI.remote,
+                                  SCPI.clearStatus] + configuration.commands() + math.commands(),
                                  log: nil))
+        // One round trip, once per session: the calibration count and message
+        // are the only way to tell a meter that was adjusted last month from one
+        // nobody has touched since it was built.
+        worker.enqueue(.readCalibration)
         worker.invalidateConfiguration()
         worker.start()
 
@@ -269,8 +276,12 @@ public final class DMMController {
             append("Null offset: \(Format.engineering(offset, unit: configuration.function.unit))")
         }
 
-        if let error = snapshot.errorText {
-            errorText = error
+        if let entries = snapshot.errorEntries {
+            errorText = Self.errorSummary(entries)
+        }
+
+        if let calibration = snapshot.calibration {
+            self.calibration = calibration
         }
 
         if let result = snapshot.selfTestResult {
@@ -570,8 +581,20 @@ public final class DMMController {
         worker.enqueue(.selfTest)
     }
 
+    /// Empties the error queue rather than taking one entry off it. Each entry
+    /// goes to the event list; the panel shows the first, since that is the one
+    /// that describes what actually went wrong — the rest are usually its wake.
     public func readError() {
         requireConnection()?.enqueue(.readError)
+    }
+
+    public func readCalibrationInfo() {
+        requireConnection()?.enqueue(.readCalibration)
+    }
+
+    private static func errorSummary(_ entries: [String]) -> String {
+        guard let first = entries.first else { return "+0,\"No error\"" }
+        return entries.count > 1 ? "\(first)  (+\(entries.count - 1) more)" : first
     }
 
     public func clearInterface() {
@@ -606,7 +629,25 @@ public final class DMMController {
                 log: frontPanelIsOn ? "Display on" : "Display off — faster readings")
     }
 
+    /// Whether the front panel is locked out as well as in remote mode.
+    ///
+    /// Plain `SYSTem:REMote` leaves the LOCAL key working, so anyone walking
+    /// past can take the meter back mid-capture. `SYSTem:RWLock` disables every
+    /// key including that one — worth having for a meter in a rack, and worth
+    /// being able to undo from here, since with it set the instrument itself
+    /// offers no way out.
+    public private(set) var frontPanelIsLocked = false
+
+    public func setFrontPanelLockout(_ locked: Bool) {
+        frontPanelIsLocked = locked
+        guard requireConnection() != nil else { return }
+        enqueue((locked ? SCPI.remoteWithLockout : SCPI.remote).asCommands,
+                log: locked ? "Front panel locked out — the LOCAL key is disabled too"
+                            : "Front panel lockout released")
+    }
+
     public func returnToLocal() {
+        frontPanelIsLocked = false
         enqueue(SCPI.local.asCommands, log: "Front panel unlocked")
     }
 

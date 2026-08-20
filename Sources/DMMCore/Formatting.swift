@@ -68,7 +68,10 @@ public enum Format {
         let scaled = value / pow(10, Double(exponent))
         let integerPlaces = max(1, Int(log10(Swift.max(abs(scaled), 1)).rounded(.down)) + 1)
         let decimals = Swift.max(0, significantDigits - integerPlaces)
-        return "\(number(scaled, decimals)) \(prefix(forExponent: exponent))\(unit)"
+        // A dimensionless reading has neither prefix nor unit, and would
+        // otherwise be left wearing a trailing space.
+        let text = "\(number(scaled, decimals)) \(prefix(forExponent: exponent))\(unit)"
+        return text.trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Readings
@@ -91,6 +94,13 @@ public enum Format {
                                range: Double?,
                                digits: Int) -> String {
         guard value.isFinite else { return "—" }
+        // The ratio has no unit at all: a quotient of two voltages carries no
+        // prefix, and the range describes the Input terminals rather than the
+        // reading, so every digit the resolution allows goes on the number.
+        if unit.isEmpty {
+            let integerPlaces = Swift.max(1, Int(log10(Swift.max(abs(value), 1)).rounded(.down)) + 1)
+            return number(value, Swift.max(0, digits + 1 - integerPlaces))
+        }
         // dB and dBm are logarithmic: there is no range to scale them against
         // and a prefix would be meaningless.
         guard allowedExponents(for: unit) != 0...0 else {

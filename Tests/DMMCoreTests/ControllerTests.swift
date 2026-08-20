@@ -329,6 +329,66 @@ final class ControllerTests: XCTestCase {
         try await waitUntil("the error queue") { self.controller.errorText.contains("No error") }
     }
 
+    func testTheMeterIsAskedWhatItsCalibrationIsWhenTheSessionStarts() async throws {
+        server.simulatedMeter.calibrationCount = 7
+        server.simulatedMeter.calibrationMessage = "CAL 2020-09-21"
+
+        try connect()
+        try await waitUntil("the calibration read-back") { self.controller.calibration != nil }
+
+        XCTAssertEqual(controller.calibration?.count, 7)
+        XCTAssertEqual(controller.calibration?.message, "CAL 2020-09-21")
+        XCTAssertTrue(controller.entries.contains { $0.text.contains("Calibrated 7 times") },
+                      "it belongs in the event list, where the session is recorded")
+    }
+
+    func testTheFrontPanelLockoutGoesDownAndComesBack() async throws {
+        try connect()
+        try await waitUntil("readings") { self.controller.readingCount > 0 }
+        XCTAssertFalse(controller.frontPanelIsLocked)
+
+        controller.setFrontPanelLockout(true)
+        try await waitUntil("the lockout") { self.server.simulatedMeter.isLockedOut }
+        XCTAssertTrue(controller.frontPanelIsLocked)
+
+        controller.setFrontPanelLockout(false)
+        try await waitUntil("the lockout to be released") { !self.server.simulatedMeter.isLockedOut }
+        XCTAssertTrue(self.server.simulatedMeter.isRemote, "releasing the lockout is not going back to local")
+
+        // And Local is still the way out entirely.
+        controller.returnToLocal()
+        try await waitUntil("local mode") { !self.server.simulatedMeter.isRemote }
+        XCTAssertFalse(controller.frontPanelIsLocked)
+    }
+
+    func testTheRatioRunsThroughTheLoopAndReadsWithoutAUnit() async throws {
+        server.simulatedMeter.signal.referenceVoltage = 5
+        try connect()
+        try await waitUntil("readings") { self.controller.readingCount > 0 }
+
+        controller.setFunction(.dcRatio)
+        try await waitUntil("the ratio to be selected") {
+            self.controller.configuration.function == .dcRatio && self.controller.readingCount > 2
+        }
+        // The read-back has to agree, or the loop would spend the session
+        // deciding the front panel had changed the function back.
+        try await settle()
+        XCTAssertEqual(controller.configuration.function, .dcRatio)
+
+        let reading = try XCTUnwrap(controller.latestReading)
+        XCTAssertEqual(reading, 4.19 / 5, accuracy: 1e-4)
+        XCTAssertFalse(controller.formattedReading.contains("V"))
+    }
+
+    func testABurstCanBeAsLargeAsTheMetersMemory() async throws {
+        try connect()
+        try await waitUntil("readings") { self.controller.readingCount > 0 }
+
+        controller.setSampleCount(2000)
+        XCTAssertEqual(controller.configuration.sampleCount, 512, "the meter holds 512 and no more")
+        try await waitUntil("a full burst") { self.server.simulatedMeter.sampleCount == 512 }
+    }
+
     func testDataLoggerWritesReadingsToDisk() async throws {
         controller.logReadingsCSV = true
         controller.logStatusText = true
