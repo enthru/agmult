@@ -45,9 +45,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.1</string>
+    <string>1.0.2</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>3</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
@@ -60,24 +60,16 @@ PLIST
 
 # The application icon, if there is one to build it from.
 #
-# The artwork is deliberately not in the repository: drop a square icon.png in
-# the root and it is picked up, leave it out and the app gets the generic icon.
-# Every size macOS wants is a downscale of that one file, and iconutil needs all
-# ten — the Finder picks by size, and a missing one is a blank icon at exactly
-# that size rather than an obvious failure.
+# The artwork is deliberately not in the repository: drop an icon.png in the
+# root and it is picked up, leave it out and the app gets the generic icon.
+# make-icon.swift does the work, because artwork never arrives in the shape an
+# icon wants — landscape, or adrift in transparency, or filling the canvas edge
+# to edge — and `sips -z` squashes the first and leaves the rest sitting at
+# different sizes in the Dock.
 ICON_SOURCE="$ROOT/icon.png"
 if [[ -f "$ICON_SOURCE" ]]; then
     echo "Building the icon…"
-    ICONSET="$(mktemp -d)/AppIcon.iconset"
-    mkdir -p "$ICONSET"
-    for size in 16 32 128 256 512; do
-        sips -z "$size" "$size" "$ICON_SOURCE" \
-            --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-        sips -z "$((size * 2))" "$((size * 2))" "$ICON_SOURCE" \
-            --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
-    done
-    iconutil --convert icns "$ICONSET" --output "$APP/Contents/Resources/AppIcon.icns"
-    rm -rf "$(dirname "$ICONSET")"
+    swift "$ROOT/Scripts/make-icon.swift" "$ICON_SOURCE" "$APP/Contents/Resources/AppIcon.icns"
 else
     echo "No icon.png in the repository root — the app gets the generic icon."
 fi
